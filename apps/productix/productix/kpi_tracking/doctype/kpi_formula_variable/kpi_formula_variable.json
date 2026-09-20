@@ -1,0 +1,14 @@
+{
+  "name": "KPI Formula Variable",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "document_type": "",
+  "engine": "InnoDB",
+  "istable": 1,
+  "fields": [
+    {"fieldname": "variable", "fieldtype": "Link", "label": "Variable", "options": "KPI Variable", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "variable_code", "fieldtype": "Data", "label": "Variable Code", "fetch_from": "variable.variable_code", "in_list_view": 1, "read_only": 1},
+    {"fieldname": "alias", "fieldtype": "Data", "label": "Alias", "in_list_view": 1, "description": "Optional alias for use in formula expression"}
+  ],
+  "permissions": []
+}

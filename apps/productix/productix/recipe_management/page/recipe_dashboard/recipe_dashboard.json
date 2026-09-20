@@ -1,0 +1,68 @@
+{
+ "content": null,
+ "creation": "2024-01-01 00:00:00",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-09-18 21:13:58.451090",
+ "modified_by": "Administrator",
+ "module": "Recipe Management",
+ "name": "recipe-dashboard",
+ "owner": "Administrator",
+ "page_name": "recipe-dashboard",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Factory Admin"
+  },
+  {
+   "role": "Assistant System Administrator"
+  },
+  {
+   "role": "Production Manager"
+  },
+  {
+   "role": "Store Keeper"
+  },
+  {
+   "role": "Purchase Manager"
+  },
+  {
+   "role": "General Staff"
+  },
+  {
+   "role": "Administrator"
+  },
+  {
+   "role": "All"
+  },
+  {
+   "role": "Desk User"
+  },
+  {
+   "role": "Stock User"
+  },
+  {
+   "role": "Stock Manager"
+  },
+  {
+   "role": "Item Manager"
+  },
+  {
+   "role": "Manufacturing User"
+  },
+  {
+   "role": "Manufacturing Manager"
+  },
+  {
+   "role": "Purchase User"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Recipe Dashboard"
+}

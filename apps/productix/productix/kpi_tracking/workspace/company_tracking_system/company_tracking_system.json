@@ -1,0 +1,416 @@
+{
+ "charts": [],
+ "content": "[{\"id\": \"hdr_main\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h3\\\"><b>Company Tracking System</b></span>\", \"col\": 12}}, {\"id\": \"hdr_shortcuts\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Actions &amp; Dashboards</b></span>\", \"col\": 12}}, {\"id\": \"sc_overview\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Company Overview\", \"col\": 3}}, {\"id\": \"sc_dept\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Department Dashboard\", \"col\": 3}}, {\"id\": \"sc_data_entry\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Data Entry\", \"col\": 3}}, {\"id\": \"sc_formula\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Formula Builder\", \"col\": 3}}, {\"id\": \"sc_ai\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"AI Assistant\", \"col\": 3}}, {\"id\": \"sc_action\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Action Center\", \"col\": 3}}, {\"id\": \"sc_kpi_def\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Definitions\", \"col\": 3}}, {\"id\": \"sc_kpi_alert\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Alerts\", \"col\": 3}}, {\"id\": \"sp_cards\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr_cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Masters, Reports &amp; Configuration</b></span>\", \"col\": 12}}, {\"id\": \"cd_dashboards\", \"type\": \"card\", \"data\": {\"card_name\": \"Dashboards & AI Tools\", \"col\": 4}}, {\"id\": \"cd_operations\", \"type\": \"card\", \"data\": {\"card_name\": \"Data Entry & Operations\", \"col\": 4}}, {\"id\": \"cd_reports\", \"type\": \"card\", \"data\": {\"card_name\": \"KPI Reports & Analytics\", \"col\": 4}}, {\"id\": \"cd_formulas\", \"type\": \"card\", \"data\": {\"card_name\": \"KPI Formulas & Templates\", \"col\": 4}}, {\"id\": \"cd_setup\", \"type\": \"card\", \"data\": {\"card_name\": \"Setup & Master Data\", \"col\": 4}}]",
+ "creation": "2026-09-19 04:43:39.160558",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "graph",
+ "idx": 0,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "Company Tracking System",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Dashboards & AI Tools",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Company Overview",
+   "link_count": 0,
+   "link_to": "kpi-company-overview",
+   "link_type": "Page",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Department Dashboard",
+   "link_count": 0,
+   "link_to": "kpi-department-dashboard",
+   "link_type": "Page",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "AI Performance Assistant",
+   "link_count": 0,
+   "link_to": "kpi-ai-assistant",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Action Center",
+   "link_count": 0,
+   "link_to": "kpi-action-center",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Data Entry & Operations",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Data Entry",
+   "link_count": 0,
+   "link_to": "KPI Data Entry",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Data Entry Page",
+   "link_count": 0,
+   "link_to": "kpi-data-entry-page",
+   "link_type": "Page",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Operational Data",
+   "link_count": 0,
+   "link_to": "KPI Operational Data",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Prediction",
+   "link_count": 0,
+   "link_to": "KPI Prediction",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Alert",
+   "link_count": 0,
+   "link_to": "KPI Alert",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Reports & Analytics",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "KPI Performance & Variance Report",
+   "link_count": 0,
+   "link_to": "KPI Performance and Variance Report",
+   "link_type": "Report",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Department Performance Report",
+   "link_count": 0,
+   "link_to": "Department Performance Report",
+   "link_type": "Report",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "KPI Trend & Forecast Report",
+   "link_count": 0,
+   "link_to": "KPI Trend and Forecast Report",
+   "link_type": "Report",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "KPI Alert & Action Report",
+   "link_count": 0,
+   "link_to": "KPI Alert and Action Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "KPI Data Quality & Completeness Report",
+   "link_count": 0,
+   "link_to": "KPI Data Quality and Completeness Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Formulas & Templates",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Definition",
+   "link_count": 0,
+   "link_to": "KPI Definition",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Formula",
+   "link_count": 0,
+   "link_to": "KPI Formula",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Template",
+   "link_count": 0,
+   "link_to": "KPI Template",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Formula Builder Page",
+   "link_count": 0,
+   "link_to": "kpi-formula-builder",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Setup Wizard",
+   "link_count": 0,
+   "link_to": "kpi-setup-wizard",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Setup & Master Data",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Settings",
+   "link_count": 0,
+   "link_to": "KPI Settings",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Department",
+   "link_count": 0,
+   "link_to": "KPI Department",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Business Unit",
+   "link_count": 0,
+   "link_to": "KPI Business Unit",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI User Assignment",
+   "link_count": 0,
+   "link_to": "KPI User Assignment",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Variable",
+   "link_count": 0,
+   "link_to": "KPI Variable",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "KPI Operational Table",
+   "link_count": 0,
+   "link_to": "KPI Operational Table",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Download Backups",
+   "link_count": 0,
+   "link_to": "backups",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-09-19 04:43:39.160558",
+ "modified_by": "Administrator",
+ "module": "KPI Tracking",
+ "name": "Company Tracking System",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Administrator"
+  },
+  {
+   "role": "KPI Admin"
+  },
+  {
+   "role": "KPI Employee"
+  },
+  {
+   "role": "KPI Manager"
+  },
+  {
+   "role": "KPI Contributor"
+  },
+  {
+   "role": "Desk User"
+  },
+  {
+   "role": "All"
+  }
+ ],
+ "sequence_id": 0.2,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Company Overview",
+   "link_to": "kpi-company-overview",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Department Dashboard",
+   "link_to": "kpi-department-dashboard",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "KPI Data Entry",
+   "link_to": "kpi-data-entry-page",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Formula Builder",
+   "link_to": "kpi-formula-builder",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "AI Assistant",
+   "link_to": "kpi-ai-assistant",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Action Center",
+   "link_to": "kpi-action-center",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "KPI Definitions",
+   "link_to": "KPI Definition",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "KPI Alerts",
+   "link_to": "KPI Alert",
+   "type": "DocType"
+  }
+ ],
+ "title": "Company Tracking System"
+}

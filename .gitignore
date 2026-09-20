@@ -1,0 +1,32 @@
+# Database & persistent volume mounts
+db-data/
+redis-cache-data/
+redis-queue-data/
+sites/
+logs/
+backups/
+*.sql
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment & credentials
+.env
+.env.local
+.env.production
+
+# Node / Frontend
+node_modules/
+
+# IDE & Tooling
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

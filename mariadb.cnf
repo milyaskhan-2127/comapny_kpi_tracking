@@ -1,0 +1,10 @@
+[mysqld]
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+character_set_server=utf8mb4
+collation_server=utf8mb4_unicode_ci
+innodb_buffer_pool_size=256M
+innodb_log_file_size=64M
+innodb_flush_method=O_DIRECT
+wait_timeout=28800
+interactive_timeout=28800

@@ -1,0 +1,42 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "autoname": "autoname",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "license_key","tenant_name","is_active","valid_until","max_users",
+    "section_usage","activated_on","last_renewed_on","renewal_count",
+    "section_payment","last_payment_ref","last_webhook_id","notes"
+  ],
+  "fields": [
+    {"fieldname": "license_key", "fieldtype": "Data", "label": "License Key", "reqd": 1, "bold": 1, "in_list_view": 1, "unique": 1, "read_only": 1},
+    {"fieldname": "tenant_name", "fieldtype": "Data", "label": "Tenant / Company", "in_list_view": 1},
+    {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1", "in_list_view": 1, "bold": 1},
+    {"fieldname": "valid_until", "fieldtype": "Date", "label": "Valid Until", "reqd": 1, "bold": 1, "in_list_view": 1},
+    {"fieldname": "max_users", "fieldtype": "Int", "label": "Max Users", "default": "5"},
+    {"fieldname": "section_usage", "fieldtype": "Section Break", "label": "Usage"},
+    {"fieldname": "activated_on", "fieldtype": "Date", "label": "Activated On", "read_only": 1},
+    {"fieldname": "last_renewed_on", "fieldtype": "Date", "label": "Last Renewed", "read_only": 1},
+    {"fieldname": "renewal_count", "fieldtype": "Int", "label": "Times Renewed", "default": "0", "read_only": 1},
+    {"fieldname": "section_payment", "fieldtype": "Section Break", "label": "Payment Tracking"},
+    {"fieldname": "last_payment_ref", "fieldtype": "Data", "label": "Last Payment Reference", "read_only": 1},
+    {"fieldname": "last_webhook_id", "fieldtype": "Data", "label": "Last Webhook ID", "read_only": 1},
+    {"fieldname": "notes", "fieldtype": "Small Text", "label": "Notes"}
+  ],
+  "module": "Subscription Management",
+  "name": "Productix License",
+  "naming_rule": "By script",
+  "owner": "Administrator",
+  "permissions": [
+    {"role": "Factory Admin", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "Assistant System Administrator", "read": 1},
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "Productix Admin", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "Productix Assistant Admin", "read": 1}
+  ],
+  "sort_field": "valid_until",
+  "sort_order": "DESC",
+  "title_field": "tenant_name",
+  "track_changes": 1
+}

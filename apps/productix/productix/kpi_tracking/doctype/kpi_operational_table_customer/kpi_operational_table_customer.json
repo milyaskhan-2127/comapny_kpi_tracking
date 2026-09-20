@@ -1,0 +1,13 @@
+{
+  "name": "KPI Operational Table Customer",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "document_type": "",
+  "engine": "InnoDB",
+  "istable": 1,
+  "fields": [
+    {"fieldname": "customer", "fieldtype": "Link", "label": "Customer", "options": "Customer", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "customer_name", "fieldtype": "Data", "label": "Customer Name", "fetch_from": "customer.customer_name", "in_list_view": 1, "read_only": 1}
+  ],
+  "permissions": []
+}

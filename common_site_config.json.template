@@ -1,0 +1,17 @@
+{
+  "db_host": "mariadb",
+  "db_port": 3306,
+  "redis_cache": "redis://redis-cache:6379",
+  "redis_queue": "redis://redis-queue:6379",
+  "redis_socketio": "redis://redis-queue:6379",
+  "socketio_port": 9000,
+  "file_watcher_port": 6787,
+  "gunicorn_workers": 2,
+  "maintenance_mode": 0,
+  "reopen_on_change": 1,
+  "serve_default_site": true,
+  "frappe_user": "frappe",
+  "auto_update": false,
+  "payment_webhook_secret": "",
+  "allow_cors": "*"
+}

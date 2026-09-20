@@ -1,0 +1,5 @@
+Recipe Management
+Subscription Management
+Instruction Room
+Alerts
+KPI Tracking

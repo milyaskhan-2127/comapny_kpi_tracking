@@ -1,0 +1,21 @@
+{
+ "color": "#f39c12",
+ "creation": "2026-09-07 03:12:44.866743",
+ "docstatus": 0,
+ "doctype": "Number Card",
+ "document_type": "Item",
+ "filters_json": "[[\"Item\",\"disabled\",\"=\",0]]",
+ "function": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "label": "Active Ingredients / Items",
+ "modified": "2026-09-18 21:13:57.887138",
+ "modified_by": "Administrator",
+ "module": "Recipe Management",
+ "name": "Total Active Items",
+ "owner": "Administrator",
+ "show_percentage_stats": 1,
+ "stats_time_interval": "Monthly",
+ "type": "Document Type"
+}

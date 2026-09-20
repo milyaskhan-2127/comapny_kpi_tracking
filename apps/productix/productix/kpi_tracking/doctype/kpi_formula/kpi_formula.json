@@ -1,0 +1,38 @@
+{
+  "name": "KPI Formula",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "document_type": "Setup",
+  "engine": "InnoDB",
+  "naming_rule": "By fieldname",
+  "autoname": "field:formula_code",
+  "fields": [
+    {"fieldname": "formula_name", "fieldtype": "Data", "label": "Formula Name", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "formula_code", "fieldtype": "Data", "label": "Formula Code", "reqd": 1, "unique": 1, "in_list_view": 1},
+    {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+    {"fieldname": "formula_type", "fieldtype": "Select", "label": "Formula Type", "options": "Custom Expression\nAddition\nSubtraction\nMultiplication\nDivision\nPercentage\nRatio\nAverage", "default": "Custom Expression", "in_list_view": 1},
+    {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1"},
+    {"fieldname": "version", "fieldtype": "Int", "label": "Version", "default": "1", "read_only": 1},
+    {"fieldname": "section_expression", "fieldtype": "Section Break", "label": "Formula Expression"},
+    {"fieldname": "expression", "fieldtype": "Small Text", "label": "Expression", "reqd": 1, "description": "Use variable codes: e.g. REVENUE - EXPENSE or ACTUAL / PLANNED * 100"},
+    {"fieldname": "section_result", "fieldtype": "Section Break", "label": "Result"},
+    {"fieldname": "result_variable", "fieldtype": "Link", "label": "Result Variable", "options": "KPI Variable"},
+    {"fieldname": "result_label", "fieldtype": "Data", "label": "Result Label"},
+    {"fieldname": "column_break_r1", "fieldtype": "Column Break"},
+    {"fieldname": "result_unit", "fieldtype": "Data", "label": "Result Unit"},
+    {"fieldname": "effective_from", "fieldtype": "Date", "label": "Effective From", "reqd": 1, "default": "Today"},
+    {"fieldname": "section_desc", "fieldtype": "Section Break"},
+    {"fieldname": "description", "fieldtype": "Small Text", "label": "Description"},
+    {"fieldname": "section_variables", "fieldtype": "Section Break", "label": "Variables Used"},
+    {"fieldname": "variables", "fieldtype": "Table", "label": "Variables", "options": "KPI Formula Variable"}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1}
+  ],
+  "sort_field": "formula_name",
+  "sort_order": "ASC",
+  "title_field": "formula_name",
+  "search_fields": "formula_name, formula_code",
+  "track_changes": 1
+}
