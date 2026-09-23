@@ -37,18 +37,20 @@ frappe.pages["kpi-department-dashboard"].on_page_load = function (wrapper) {
     frappe.xcall("productix.kpi_tracking.api.dashboard.get_user_context").then((ctx) => {
         page._ctx = ctx || {};
         page._frequency = (ctx && ctx.default_frequency) || "Daily";
-        const deptList = (ctx && ctx.department_list && ctx.department_list.length > 0)
+        const rawDeptList = (ctx && ctx.department_list && ctx.department_list.length > 0)
             ? ctx.department_list
-            : (ctx && ctx.departments || []).map(d => ({ name: d, department_name: d, department_code: d }));
+            : (ctx && ctx.departments || []).map(d => ({ name: d, department_name: d, department_code: d, display_name: d }));
 
+        // Retain all authorized departments without collapsing distinct departments
+        const deptList = rawDeptList;
         page._depts = deptList;
 
         const params = frappe.utils.get_url_dict();
         let targetDept = null;
 
-        if (ctx.is_admin) {
+        if (ctx.is_admin || ctx.is_ceo) {
             targetDept = params.department;
-            if (!targetDept) {
+            if (!targetDept || !deptList.some(d => d.name === targetDept)) {
                 targetDept = deptList.length > 0 ? deptList[0].name : "PRODUCTION";
             }
         } else {
@@ -68,6 +70,8 @@ function setup_department_page_actions(page) {
     if (page.clear_menu) page.clear_menu();
 
     const isAdmin = page._ctx && page._ctx.is_admin;
+    const isCeo = page._ctx && page._ctx.is_ceo;
+
     if (isAdmin) {
         page.set_primary_action("🏢 Company Overview", () => frappe.set_route("kpi-company-overview"), "fa fa-building");
         page.set_secondary_action("🔄 Refresh", () => load_dept(page), "fa fa-sync");
@@ -80,6 +84,16 @@ function setup_department_page_actions(page) {
         page.add_menu_item("🔄 Refresh Department", () => load_dept(page));
         page.add_menu_item("🏢 Company Performance Overview", () => frappe.set_route("kpi-company-overview"));
         page.add_menu_item("✍️ Metric Data Entry", () => frappe.set_route("kpi-data-entry-page"));
+        page.add_menu_item("🤖 AI Assistant", () => frappe.set_route("kpi-ai-assistant"));
+        page.add_menu_item("🚨 Action & Alert Center", () => frappe.set_route("kpi-action-center"));
+        page.add_menu_item("💾 Backup & Restore Manager", () => frappe.set_route("backups"));
+    } else if (isCeo) {
+        // CEO View: Executive Read-Only actions across departments
+        page.set_primary_action("🔄 Refresh", () => load_dept(page), "fa fa-sync");
+        page.add_inner_button("🤖 AI Assistant", () => frappe.set_route("kpi-ai-assistant"));
+        page.add_inner_button("🚨 Action Center", () => frappe.set_route("kpi-action-center"));
+
+        page.add_menu_item("🔄 Refresh Department", () => load_dept(page));
         page.add_menu_item("🤖 AI Assistant", () => frappe.set_route("kpi-ai-assistant"));
         page.add_menu_item("🚨 Action & Alert Center", () => frappe.set_route("kpi-action-center"));
     } else {
@@ -116,8 +130,8 @@ function setup_department_page_actions(page) {
 }
 
 function load_dept(page, dept) {
-    const isAdmin = page._ctx && page._ctx.is_admin;
-    if (!isAdmin && page._ctx && page._ctx.assigned_department) {
+    const isEmployee = page._ctx && page._ctx.is_employee;
+    if (isEmployee && page._ctx.assigned_department) {
         dept = page._ctx.assigned_department;
     } else {
         dept = dept || page._selected_dept || (page._depts && page._depts[0] && page._depts[0].name) || "PRODUCTION";
@@ -154,20 +168,23 @@ function render_dept(page, data, dept) {
     const isAdmin = page._ctx && page._ctx.is_admin;
 
     let deptControlHtml = '';
-    if (isAdmin && depts.length > 1) {
+    const canSwitch = (isAdmin || (page._ctx && page._ctx.is_ceo)) && depts.length > 1;
+    if (canSwitch) {
         deptControlHtml = `
             <div style="display:flex;align-items:center;gap:10px;min-width:260px;">
                 <label style="margin:0;font-size:13px;font-weight:700;color:#475569;">Switch Department:</label>
-                <select id="dept-switcher-select" class="form-control form-control-sm" style="font-weight:600;max-width:220px;">
-                    ${depts.map(d => `<option value="${d.name}" ${d.name === dept ? 'selected' : ''}>${d.department_name || d.name}</option>`).join('')}
+                <select id="dept-switcher-select" class="form-control form-control-sm" style="font-weight:600;max-width:240px;">
+                    ${depts.map(d => `<option value="${d.name}" ${d.name === dept ? 'selected' : ''}>${frappe.utils.escape_html(d.display_name || d.department_name || d.name)}</option>`).join('')}
                 </select>
             </div>
         `;
     } else {
+        const curDeptObj = depts.find(d => d.name === dept);
+        const curDisplayName = (curDeptObj && curDeptObj.display_name) || deptName;
         deptControlHtml = `
             <div style="display:flex;align-items:center;gap:8px;">
                 <span style="font-size:12px;font-weight:700;color:#475569;">Assigned Department:</span>
-                <span class="badge badge-primary" style="font-size:13px;padding:5px 12px;background:#2563eb;">${deptName}</span>
+                <span class="badge badge-primary" style="font-size:13px;padding:5px 12px;background:#2563eb;">${frappe.utils.escape_html(curDisplayName)}</span>
             </div>
         `;
     }
@@ -182,6 +199,7 @@ function render_dept(page, data, dept) {
             const pred_str = pred ? `🔮 ${pred.horizon || 'Forecast'}: <strong>${pred.predicted_value} ${kpi.unit || ''}</strong> (${pred.confidence}% conf)` : "";
             const achPct = kpi.achievement != null ? Math.min(Math.round(kpi.achievement), 100) : 0;
             const achDisplay = kpi.achievement != null ? Math.round(kpi.achievement) + "%" : "--";
+            const scoreDisplay = kpi.score != null ? Math.round(kpi.score) + "/100" : (kpi.normalized_score != null ? Math.round(kpi.normalized_score) + "/100" : (kpi.achievement != null ? Math.min(100, Math.max(0, Math.round(kpi.achievement))) + "/100" : "--"));
 
             return `
                 <div class="kpi-tracking-kpi-card kpi-tracking-kpi-card--${status_class}" data-kpi="${kpi.kpi_code}" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:18px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.04);transition:all 0.2s;">
@@ -202,8 +220,8 @@ function render_dept(page, data, dept) {
 
                     <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:6px;">
                         <span>🎯 Ach: <strong>${achDisplay}</strong></span>
-                        <span>📈 Growth: <strong>${growth_str}</strong></span>
-                        <span>${trend_icon} ${kpi.trend || "Stable"}</span>
+                        <span>⭐ Score: <strong>${scoreDisplay}</strong></span>
+                        <span>📈 ${trend_icon} ${growth_str}</span>
                     </div>
 
                     ${pred_str ? `<div style="font-size:11px;color:#4f46e5;background:#eef2ff;border:1px solid #e0e7ff;padding:6px 10px;border-radius:6px;margin-top:8px;">${pred_str}</div>` : ""}
@@ -226,7 +244,14 @@ function render_dept(page, data, dept) {
     }
 
     const deptHistory = data.history || [];
-    const deptPred = data.predictions || {};
+    const predObj = data.predictions || {};
+    const selectedPred = data.selected_prediction || (predObj && (predObj[page._horizon] || predObj.next_month)) || null;
+    const isPredAvailable = (predObj && predObj.available) || (selectedPred && selectedPred.predicted_score != null);
+    const predScore = selectedPred && selectedPred.predicted_score != null ? selectedPred.predicted_score : null;
+    const predHorizon = (selectedPred && selectedPred.horizon) || (page._horizon ? page._horizon.replace(/_/g, ' ') : 'Next Cycle');
+    const predTargetPeriod = (selectedPred && selectedPred.target_period) || 'Next Period';
+    const predConfidence = (selectedPred && selectedPred.confidence) || 90;
+
     const deptTrend = data.trend || "Stable";
     const deptGrowth = data.growth;
     let deptGrowthStr = "--";
@@ -253,16 +278,16 @@ function render_dept(page, data, dept) {
                     <div>
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                             <h5 style="margin:0;font-size:14px;font-weight:700;color:#0f172a;">🔮 Predictive Intelligence</h5>
-                            <span class="badge ${deptPred.available ? 'badge-info' : 'badge-light'}" style="font-size:11px;">
-                                ${deptPred.available ? 'OLS Model' : 'Notice'}
+                            <span class="badge ${isPredAvailable ? 'badge-info' : 'badge-light'}" style="font-size:11px;">
+                                ${isPredAvailable ? 'OLS Model' : 'Notice'}
                             </span>
                         </div>
-                        ${deptPred.available ? `
+                        ${isPredAvailable && predScore != null ? `
                             <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px;margin-bottom:12px;">
-                                <div style="font-size:11px;color:#0369a1;font-weight:600;text-transform:uppercase;">${deptPred.horizon || 'Next Cycle'} Forecast</div>
-                                <div style="font-size:26px;font-weight:800;color:#0284c7;margin:4px 0;">${deptPred.predicted_score != null ? deptPred.predicted_score + '%' : '--'}</div>
-                                <div style="font-size:11px;color:#0369a1;">Target Period: <strong>${deptPred.target_period || 'Next Period'}</strong></div>
-                                <div style="font-size:11px;color:#0369a1;margin-top:2px;">Confidence: <strong>${deptPred.confidence || 90}% (R² Regression)</strong></div>
+                                <div style="font-size:11px;color:#0369a1;font-weight:600;text-transform:uppercase;">${predHorizon} Forecast</div>
+                                <div style="font-size:26px;font-weight:800;color:#0284c7;margin:4px 0;">${predScore}%</div>
+                                <div style="font-size:11px;color:#0369a1;">Target Period: <strong>${predTargetPeriod}</strong></div>
+                                <div style="font-size:11px;color:#0369a1;margin-top:2px;">Confidence: <strong>${predConfidence}% (R² Regression)</strong></div>
                             </div>
                             <div style="font-size:12px;color:#64748b;">
                                 Based on ${deptHistory.length} historical reporting cycles. Score is strictly normalized to [0, 100%].
@@ -272,7 +297,7 @@ function render_dept(page, data, dept) {
                                 <div style="font-size:24px;margin-bottom:6px;">📊</div>
                                 <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:4px;">Prediction Unavailable</div>
                                 <div style="font-size:11px;color:#94a3b8;line-height:1.4;">
-                                    ${deptPred.message || 'Requires at least 3 historical reporting periods to generate statistical linear regression predictions.'}
+                                    ${predObj.message || 'Requires at least 3 historical reporting periods to generate statistical linear regression predictions.'}
                                 </div>
                             </div>
                         `}
@@ -302,6 +327,74 @@ function render_dept(page, data, dept) {
                             <span style="font-size:11px;color:#94a3b8;">${a.trigger_period || ''}</span>
                         </div>
                     `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    let machineHealthCardHtml = '';
+    const mh = data.machine_health;
+    if (mh && mh.summary && mh.summary.total > 0) {
+        const ms = mh.summary;
+        const avgScore = ms.avg_score != null ? ms.avg_score : 0;
+        const healthColor = avgScore >= 80 ? '#10b981' : avgScore >= 60 ? '#f59e0b' : '#ef4444';
+        const machines = mh.machines || [];
+
+        machineHealthCardHtml = `
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:18px 20px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+                    <div>
+                        <h5 style="margin:0 0 2px 0;font-size:14px;font-weight:700;color:#0f172a;">⚙️ Department Machine Health Overview</h5>
+                        <span style="font-size:11px;color:#64748b;">Real-time operational health &amp; predictive sensor metrics across ${ms.total} equipment units</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <span style="font-size:12px;color:#64748b;">Avg Health Score: <strong style="font-size:14px;color:${healthColor};">${avgScore}/100</strong></span>
+                        <button class="btn btn-xs btn-default" id="toggle-dept-machines-btn" style="font-weight:600;color:#2563eb;">
+                            <i class="fa fa-list mr-1"></i> Equipment List (${ms.total})
+                        </button>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;">
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;text-align:center;">
+                        <div style="font-size:18px;font-weight:800;color:#0f172a;">${ms.total}</div>
+                        <div style="font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-top:2px;">Total Units</div>
+                    </div>
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;text-align:center;">
+                        <div style="font-size:18px;font-weight:800;color:#16a34a;">${(ms.healthy || 0) + (ms.good || 0)}</div>
+                        <div style="font-size:10px;text-transform:uppercase;color:#16a34a;font-weight:700;margin-top:2px;">Healthy / Good</div>
+                    </div>
+                    <div style="background:#fffbeb;border:1px solid #fef3c7;border-radius:8px;padding:10px 14px;text-align:center;">
+                        <div style="font-size:18px;font-weight:800;color:#d97706;">${ms.warning || 0}</div>
+                        <div style="font-size:10px;text-transform:uppercase;color:#d97706;font-weight:700;margin-top:2px;">Warning</div>
+                    </div>
+                    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;text-align:center;">
+                        <div style="font-size:18px;font-weight:800;color:#dc2626;">${ms.critical || 0}</div>
+                        <div style="font-size:10px;text-transform:uppercase;color:#dc2626;font-weight:700;margin-top:2px;">Critical Risk</div>
+                    </div>
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;text-align:center;">
+                        <div style="font-size:18px;font-weight:800;color:#64748b;">${ms.no_data || 0}</div>
+                        <div style="font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-top:2px;">No Reading</div>
+                    </div>
+                </div>
+                <div id="dept-machines-list-collapse" style="display:none;margin-top:14px;border-top:1px solid #f1f5f9;padding-top:14px;">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
+                        ${machines.map(m => {
+                            const mStatus = m.health_status || "No Data";
+                            const mColor = mStatus === "Healthy" ? "badge-success" : mStatus === "Good" ? "badge-info" : mStatus === "Warning" ? "badge-warning" : mStatus === "Critical" ? "badge-danger" : "badge-secondary";
+                            return `
+                                <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;">
+                                    <div>
+                                        <strong style="font-size:13px;color:#0f172a;">${frappe.utils.escape_html(m.machine_name || m.name)}</strong>
+                                        <div style="font-size:11px;color:#64748b;">${m.machine_type || ''} ${m.location ? '· ' + frappe.utils.escape_html(m.location) : ''}</div>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <span class="badge ${mColor}" style="font-size:10px;">${mStatus}</span>
+                                        <div style="font-size:12px;font-weight:700;color:#0f172a;margin-top:2px;">${m.health_score != null ? m.health_score + '/100' : '--'}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
                 </div>
             </div>
         `;
@@ -394,6 +487,8 @@ function render_dept(page, data, dept) {
             </div>
 
             ${alertsHtml}
+
+            ${machineHealthCardHtml}
 
             ${trendSectionHtml}
 
@@ -515,13 +610,13 @@ function render_dept(page, data, dept) {
         page.main.find("#dept-back-btn").on("click", function() {
             frappe.set_route("kpi-company-overview");
         });
-
-        // Switch department handler
-        page.main.find("#dept-switcher-select").on("change", function() {
-            const selected = $(this).val();
-            load_dept(page, selected);
-        });
     }
+
+    // Switch department handler (Admin & CEO)
+    page.main.find("#dept-switcher-select").on("change", function() {
+        const selected = $(this).val();
+        load_dept(page, selected);
+    });
 
     // Timeframe filter handler
     page.main.find("#dept-timeframe-buttons button").on("click", function () {
@@ -535,8 +630,14 @@ function render_dept(page, data, dept) {
         if (kpi_code) show_kpi_detail(page, kpi_code);
     });
 
-    // Send Escalation Handler (Employee)
-    if (!isAdmin) {
+    // Toggle Department Machines List
+    page.main.find("#toggle-dept-machines-btn").on("click", function() {
+        page.main.find("#dept-machines-list-collapse").slideToggle(200);
+    });
+
+    // Send Escalation Handler (Employee only)
+    const isEmployee = page._ctx && page._ctx.is_employee;
+    if (isEmployee) {
         page.main.find("#btn-send-escalation").on("click", function() {
             const btn = $(this);
             const subType = page.main.find("#esc-subject-type").val();
@@ -585,9 +686,9 @@ function render_dept(page, data, dept) {
                 const labels = deptHistory.map(h => h.period);
                 const values = deptHistory.map(h => h.score);
 
-                if (deptPred.available && deptPred.predicted_score != null) {
-                    labels.push(`(${deptPred.horizon || 'Forecast'})`);
-                    values.push(deptPred.predicted_score);
+                if (isPredAvailable && predScore != null) {
+                    labels.push(`(${predHorizon})`);
+                    values.push(predScore);
                 }
 
                 window.productix_charts["#dept-trend-line-chart"] = new frappe.Chart("#dept-trend-line-chart", {
@@ -743,7 +844,7 @@ function load_embedded_data_entry(page, dept) {
                             </div>
                             <div class="col-md-3 mb-2">
                                 <label style="font-size:12px;font-weight:600;color:transparent;">Action</label>
-                                <button class="btn btn-primary btn-block dept-submit-btn" style="font-weight:600;">
+                                <button class="btn btn-primary btn-block dept-submit-btn" data-period="${kpi.period}" style="font-weight:600;">
                                     Submit
                                 </button>
                             </div>
@@ -802,6 +903,7 @@ function load_embedded_data_entry(page, dept) {
                 kpi: kpiCode,
                 department: deptCode,
                 actual_value: actualVal,
+                period: btn.data("period") || null,
                 input_values: inputValues.length > 0 ? inputValues : null,
             }).then((r) => {
                 frappe.show_alert({ message: `✅ Submitted: ${r.status} (${Math.round(r.achievement)}%)`, indicator: r.status === "On Track" ? "green" : "orange" });
@@ -969,6 +1071,30 @@ function show_kpi_detail(page, kpi_code) {
 
         const chartUid = "kpi-modal-trend-chart-" + (kpi_code || "metric").replace(/[^a-zA-Z0-9_-]/g, "_") + "-" + Date.now();
 
+        let alertsModalHtml = '';
+        const kpiAlerts = data.alerts || [];
+        if (kpiAlerts.length > 0) {
+            alertsModalHtml = `
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                        <h6 style="margin:0;font-weight:700;font-size:13px;color:#0f172a;">🚨 Correlated Alerts &amp; Outliers</h6>
+                        <span style="font-size:11px;color:#64748b;">${kpiAlerts.length} Recorded Alerts</span>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        ${kpiAlerts.map(a => `
+                            <div style="display:flex;justify-content:space-between;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid ${a.severity === 'Critical' ? '#ef4444' : '#f59e0b'};border-radius:6px;padding:8px 12px;font-size:12px;">
+                                <div>
+                                    <span class="badge ${a.severity === 'Critical' ? 'badge-danger' : 'badge-warning'}" style="margin-right:6px;">${a.severity}</span>
+                                    <strong style="color:#0f172a;">${frappe.utils.escape_html(a.alert_type)}</strong>: <span style="color:#475569;">${frappe.utils.escape_html(a.message || '')}</span>
+                                </div>
+                                <span style="font-size:11px;color:#94a3b8;">${a.trigger_period || ''} (${a.status})</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
         let detail = `
             <div class="kpi-tracking-app" style="padding:10px 0;">
                 <div class="row mb-3" style="text-align:center;">
@@ -998,16 +1124,18 @@ function show_kpi_detail(page, kpi_code) {
 
                 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:18px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                        <h6 style="margin:0;font-weight:700;font-size:13px;color:#0f172a;">📈 Historical Actual vs. Target Trend Line &amp; Forecast</h6>
+                        <h6 style="margin:0;font-weight:700;font-size:13px;color:#0f172a;">📈 Master Trend: Actual vs. Target, Thresholds &amp; Forecast</h6>
                         <span style="font-size:11px;color:#64748b;">${history.length} Data Points</span>
                     </div>
                     <div id="${chartUid}" class="kpi-modal-chart-mount" style="height:220px;min-height:220px;"></div>
                 </div>
+
+                ${alertsModalHtml}
             </div>
         `;
 
         const d = new frappe.ui.Dialog({
-            title: `📊 ${kpi.kpi_name || kpi_code} — Trend & High-Accuracy Forecasting`,
+            title: `📊 ${kpi.kpi_name || kpi_code} — Master Trend & Forecasting`,
             size: "extra-large",
             fields: [{ fieldtype: "HTML", fieldname: "detail_html" }],
         });
@@ -1016,10 +1144,20 @@ function show_kpi_detail(page, kpi_code) {
         d.fields_dict.detail_html.$wrapper.html(detail);
 
         let chartInitialized = false;
+        let chartRenderAttempt = 0;
         function renderModalChart() {
             if (chartInitialized) return;
             const chartEl = d.fields_dict.detail_html.$wrapper.find(`#${chartUid}`);
             if (!chartEl.length) return;
+
+            const containerWidth = chartEl.width() || (chartEl[0] ? chartEl[0].getBoundingClientRect().width : 0);
+            if (containerWidth <= 0) {
+                chartRenderAttempt++;
+                if (chartRenderAttempt < 20) {
+                    setTimeout(renderModalChart, 50);
+                }
+                return;
+            }
 
             chartInitialized = true;
             if (page._kpi_dialog_chart) {
@@ -1033,25 +1171,41 @@ function show_kpi_detail(page, kpi_code) {
                 const actualVals = history.map((h) => parseFloat(h.actual_value != null ? h.actual_value : 0));
                 const targetVals = history.map((h) => parseFloat(h.target_value != null ? h.target_value : (kpi.target_value || 0)));
 
+                const datasets = [
+                    { name: `Actual Recorded (${unit || 'Value'})`, values: actualVals, chartType: "line" },
+                    { name: `Target Benchmark (${unit || 'Value'})`, values: targetVals, chartType: "line" },
+                ];
+                const chartColors = ["#2563eb", "#10b981"];
+
+                if (kpi.critical_threshold != null && kpi.critical_threshold !== "") {
+                    const critVals = history.map(() => parseFloat(kpi.critical_threshold));
+                    datasets.push({ name: `Critical Threshold (${unit || 'Value'})`, values: critVals, chartType: "line" });
+                    chartColors.push("#ef4444");
+                } else if (kpi.warning_threshold != null && kpi.warning_threshold !== "") {
+                    const warnVals = history.map(() => parseFloat(kpi.warning_threshold));
+                    datasets.push({ name: `Warning Threshold (${unit || 'Value'})`, values: warnVals, chartType: "line" });
+                    chartColors.push("#f59e0b");
+                }
+
                 if (multiPreds.available && predMonth.predicted_value != null) {
                     labels.push(`(${predMonth.horizon || 'Next Month'} Forecast)`);
                     actualVals.push(parseFloat(predMonth.predicted_value));
                     targetVals.push(parseFloat(kpi.target_value || 0));
+                    if (datasets.length > 2) {
+                        datasets[2].values.push(parseFloat(kpi.critical_threshold || kpi.warning_threshold || 0));
+                    }
                 }
 
                 try {
                     page._kpi_dialog_chart = new frappe.Chart(chartEl[0], {
                         data: {
                             labels: labels,
-                            datasets: [
-                                { name: `Actual / Forecast (${unit || 'Value'})`, values: actualVals, chartType: "line" },
-                                { name: `Target Benchmark (${unit || 'Value'})`, values: targetVals, chartType: "line" },
-                            ],
+                            datasets: datasets,
                         },
                         type: "axis-mixed",
-                        height: 200,
-                        colors: ["#2563eb", "#94a3b8"],
-                        lineOptions: { regionFill: 1, hideDots: 0, dotSize: 5 },
+                        height: 220,
+                        colors: chartColors,
+                        lineOptions: { regionFill: 0, hideDots: 0, dotSize: 5 },
                     });
                 } catch (err) {
                     console.error("Error creating modal trend chart:", err);
@@ -1070,12 +1224,11 @@ function show_kpi_detail(page, kpi_code) {
                 destroy_chart(page._kpi_dialog_chart);
                 page._kpi_dialog_chart = null;
             }
-            setTimeout(() => {
-                if (d.$wrapper) {
-                    d.$wrapper.remove();
-                }
-                $(".modal-backdrop").remove();
-            }, 100);
+            if (d.$wrapper) {
+                d.$wrapper.off("shown.bs.modal");
+                d.$wrapper.remove();
+            }
+            $(".modal-backdrop").remove();
             page._kpi_dialog = null;
         };
 
@@ -1083,6 +1236,6 @@ function show_kpi_detail(page, kpi_code) {
 
         setTimeout(() => {
             renderModalChart();
-        }, 150);
+        }, 100);
     });
 }

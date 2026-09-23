@@ -60,7 +60,11 @@
   ],
   "permissions": [
     {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
-    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1}
+    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "KPI CEO", "read": 1},
+    {"role": "KPI Employee", "read": 1},
+    {"role": "KPI Manager", "read": 1},
+    {"role": "KPI Contributor", "read": 1}
   ],
   "sort_field": "kpi_name",
   "sort_order": "ASC",

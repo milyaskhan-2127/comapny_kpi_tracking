@@ -36,8 +36,9 @@ frappe.pages["kpi-company-overview"].on_page_load = function (wrapper) {
     frappe.xcall("productix.kpi_tracking.api.dashboard.get_user_context").then((ctx) => {
         page._ctx = ctx || {};
         page._frequency = (ctx && ctx.default_frequency) || "Daily";
-        if (!ctx.is_admin) {
-            frappe.show_alert({ message: "Company Overview is restricted to administrators.", indicator: "orange" });
+        const canView = ctx.is_admin || (ctx.is_ceo && ctx.ceo_config && ctx.ceo_config.can_view_company_overview);
+        if (!canView) {
+            frappe.show_alert({ message: "Company Overview is restricted to authorized administrators and CEOs.", indicator: "orange" });
             frappe.set_route("kpi-department-dashboard", { department: ctx.assigned_department });
             return;
         }
@@ -49,10 +50,17 @@ frappe.pages["kpi-company-overview"].on_page_load = function (wrapper) {
 };
 
 function setup_page_actions(page) {
+    if (page.clear_inner_toolbar) page.clear_inner_toolbar();
+    if (page.clear_menu) page.clear_menu();
+
+    const isAdmin = page._ctx && page._ctx.is_admin;
+
     page.set_primary_action("📊 Data Entry Monitoring", () => show_monitoring_modal(page), "fa fa-chart-bar");
     page.set_secondary_action("🔄 Refresh", () => load_dashboard(page), "fa fa-sync");
 
-    page.add_inner_button("👥 User Management", () => show_user_management_modal(page));
+    if (isAdmin) {
+        page.add_inner_button("👥 User Management", () => show_user_management_modal(page));
+    }
     page.add_inner_button("🤖 AI Assistant", () => frappe.set_route("kpi-ai-assistant"));
     page.add_inner_button("🚨 Action Center", () => frappe.set_route("kpi-action-center"));
     page.add_inner_button("✍️ Data Entry", () => frappe.set_route("kpi-data-entry-page"));
@@ -60,13 +68,18 @@ function setup_page_actions(page) {
     // Populate standard 3-dot dropdown menu
     page.add_menu_item("🔄 Refresh Dashboard", () => load_dashboard(page));
     page.add_menu_item("📊 Data Entry Monitoring", () => show_monitoring_modal(page));
-    page.add_menu_item("👥 User & Role Management", () => show_user_management_modal(page));
+    if (isAdmin) {
+        page.add_menu_item("👥 User & Role Management", () => show_user_management_modal(page));
+    }
     page.add_menu_item("🤖 AI Assistant", () => frappe.set_route("kpi-ai-assistant"));
     page.add_menu_item("🚨 Action & Alert Center", () => frappe.set_route("kpi-action-center"));
     page.add_menu_item("✍️ Metric Data Entry", () => frappe.set_route("kpi-data-entry-page"));
-    page.add_menu_item("📐 Formula Builder", () => frappe.set_route("kpi-formula-builder"));
-    page.add_menu_item("⚡ Performance Setup Wizard", () => frappe.set_route("kpi-setup-wizard"));
-    page.add_menu_item("⚙️ Settings", () => frappe.set_route("Form", "KPI Settings"));
+    if (isAdmin) {
+        page.add_menu_item("📐 Formula Builder", () => frappe.set_route("kpi-formula-builder"));
+        page.add_menu_item("⚡ Performance Setup Wizard", () => frappe.set_route("kpi-setup-wizard"));
+        page.add_menu_item("💾 Backup & Restore Manager", () => frappe.set_route("backups"));
+        page.add_menu_item("⚙️ Settings", () => frappe.set_route("Form", "KPI Settings"));
+    }
 }
 
 function load_dashboard(page) {
@@ -109,6 +122,72 @@ function render_dashboard(page, data) {
     if (growth != null) {
         growthStr = (growth > 0 ? "+" : "") + growth + "%";
         growthBadgeClass = growth > 0 ? "badge-success" : (growth < 0 ? "badge-danger" : "badge-secondary");
+    }
+
+    let companyMachineHealthHtml = '';
+    const cmh = data.machine_health_overview;
+    if (cmh && cmh.company_summary && cmh.company_summary.total_machines > 0) {
+        const cs = cmh.company_summary;
+        const avgScore = cs.avg_score != null ? cs.avg_score : 0;
+        const healthColor = avgScore >= 80 ? '#10b981' : avgScore >= 60 ? '#f59e0b' : '#ef4444';
+        const deptMachines = cmh.departments || [];
+
+        companyMachineHealthHtml = `
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+                    <div>
+                        <h4 style="margin:0 0 4px 0;font-size:16px;font-weight:700;color:#0f172a;">⚙️ Enterprise Machine Health Overview</h4>
+                        <span style="font-size:12px;color:#64748b;">Consolidated equipment sensor monitoring, predictive risk index &amp; health scores</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:14px;">
+                        <span style="font-size:13px;color:#64748b;">Fleet Health Score: <strong style="font-size:16px;color:${healthColor};">${avgScore}/100</strong></span>
+                        <button class="btn btn-xs btn-default" onclick="frappe.set_route('List', 'Machine')" style="font-weight:600;color:#2563eb;">
+                            <i class="fa fa-cogs mr-1"></i> Open Machine Registry
+                        </button>
+                    </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;">
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;text-align:center;">
+                        <div style="font-size:22px;font-weight:800;color:#0f172a;">${cs.total_machines}</div>
+                        <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;margin-top:2px;">Monitored Machines</div>
+                    </div>
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;text-align:center;">
+                        <div style="font-size:22px;font-weight:800;color:#16a34a;">${(cs.healthy || 0) + (cs.good || 0)}</div>
+                        <div style="font-size:11px;text-transform:uppercase;color:#16a34a;font-weight:700;margin-top:2px;">Healthy / Good</div>
+                    </div>
+                    <div style="background:#fffbeb;border:1px solid #fef3c7;border-radius:8px;padding:12px 16px;text-align:center;">
+                        <div style="font-size:22px;font-weight:800;color:#d97706;">${cs.warning || 0}</div>
+                        <div style="font-size:11px;text-transform:uppercase;color:#d97706;font-weight:700;margin-top:2px;">Warning Alert</div>
+                    </div>
+                    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;text-align:center;">
+                        <div style="font-size:22px;font-weight:800;color:#dc2626;">${cs.critical || 0}</div>
+                        <div style="font-size:11px;text-transform:uppercase;color:#dc2626;font-weight:700;margin-top:2px;">Critical Risk</div>
+                    </div>
+                </div>
+
+                ${deptMachines.length > 0 ? `
+                    <div style="border-top:1px solid #f1f5f9;padding-top:14px;">
+                        <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:8px;">Department Equipment Distribution:</div>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">
+                            ${deptMachines.filter(dm => dm.total > 0).map(dm => `
+                                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">
+                                    <div>
+                                        <strong style="font-size:13px;color:#0f172a;">${frappe.utils.escape_html(dm.department_name || dm.department)}</strong>
+                                        <div style="font-size:11px;color:#64748b;">${dm.total} units · Avg: ${dm.avg_score}/100</div>
+                                    </div>
+                                    <div style="display:flex;gap:4px;">
+                                        ${dm.critical > 0 ? `<span class="badge badge-danger" style="font-size:10px;">${dm.critical} Crit</span>` : ''}
+                                        ${dm.warning > 0 ? `<span class="badge badge-warning" style="font-size:10px;">${dm.warning} Warn</span>` : ''}
+                                        <span class="badge badge-success" style="font-size:10px;">${(dm.healthy || 0) + (dm.good || 0)} OK</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
     }
 
     let deptCardsHtml = '';
@@ -286,6 +365,8 @@ function render_dashboard(page, data) {
                 </div>
             </div>
 
+            ${companyMachineHealthHtml}
+
             <!-- Department Breakdown Grid Section -->
             <div style="margin-bottom:24px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
@@ -319,10 +400,15 @@ function render_dashboard(page, data) {
         load_dashboard(page);
     });
 
-    // Render Charts with lifecycle management
-    setTimeout(() => {
+    // Render Charts with container sizing and lifecycle management
+    function renderCompanyCharts() {
         const trendEl = page.main.find("#company-trend-line-chart");
         if (trendEl.length) {
+            const containerWidth = trendEl.width() || (trendEl[0] ? trendEl[0].getBoundingClientRect().width : 0);
+            if (containerWidth <= 0) {
+                setTimeout(renderCompanyCharts, 60);
+                return;
+            }
             destroy_chart("#company-trend-line-chart");
             trendEl.empty();
             if (history.length > 0 && typeof frappe.Chart !== "undefined") {
@@ -374,7 +460,8 @@ function render_dashboard(page, data) {
                 deptEl.html('<div class="text-center p-4 text-muted" style="font-size:12px;">No department scores available yet.</div>');
             }
         }
-    }, 150);
+    }
+    setTimeout(renderCompanyCharts, 100);
 }
 
 function show_monitoring_modal(page) {
@@ -566,7 +653,9 @@ function show_monitoring_modal(page) {
         d.fields_dict.monitoring_html.$wrapper.html(content);
 
         // Single department reminder button
-        d.fields_dict.monitoring_html.$wrapper.find(".notify-dept-btn").on("click", function () {
+        d.fields_dict.monitoring_html.$wrapper.find(".notify-dept-btn").on("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
             const btn = $(this);
             const deptCode = btn.data("dept");
             const deptName = btn.data("deptname");
@@ -591,12 +680,13 @@ function show_user_management_modal(page) {
     if (page._user_mgmt_dialog) {
         try {
             page._user_mgmt_dialog.hide();
-            if (page._user_mgmt_dialog.$wrapper) {
-                page._user_mgmt_dialog.$wrapper.remove();
-            }
         } catch (e) {}
         page._user_mgmt_dialog = null;
     }
+
+    let usersCache = [];
+    let deptsCache = [];
+    let usersMap = {};
 
     const d = new frappe.ui.Dialog({
         title: "👥 User & Role Management",
@@ -604,51 +694,77 @@ function show_user_management_modal(page) {
         fields: [{ fieldtype: "HTML", fieldname: "user_mgmt_html" }],
         primary_action_label: "➕ Create New User",
         primary_action: function () {
-            show_edit_user_modal(null, page, () => show_user_management_modal(page));
+            show_edit_user_modal(null, deptsCache, () => load_users_table());
         }
     });
     page._user_mgmt_dialog = d;
 
     d.onhide = function () {
-        setTimeout(() => {
-            if (d.$wrapper) {
-                d.$wrapper.remove();
-            }
-            $(".modal-backdrop").remove();
-        }, 100);
         page._user_mgmt_dialog = null;
     };
 
-    d.fields_dict.user_mgmt_html.$wrapper.html('<div class="text-center p-4"><i class="fa fa-spinner fa-spin"></i> Loading users...</div>');
-    d.show();
+    function load_users_table() {
+        const $wrapper = d.fields_dict.user_mgmt_html.$wrapper;
+        $wrapper.html(`
+            <div class="text-center p-4" style="color:#64748b;">
+                <i class="fa fa-spinner fa-spin fa-2x"></i>
+                <div style="margin-top:8px;font-weight:600;">Loading users...</div>
+            </div>
+        `);
 
-    frappe.xcall("productix.kpi_tracking.api.user_management.get_users").then((data) => {
-        const users = (data && data.users) || [];
+        frappe.xcall("productix.kpi_tracking.api.user_management.get_users").then((data) => {
+            usersCache = (data && data.users) || [];
+            deptsCache = (data && data.departments) || [];
+            usersMap = {};
 
-        let userRows = users.map(u => {
+            usersCache.forEach(u => {
+                usersMap[u.user] = u;
+            });
+
+            render_table();
+        }).catch((err) => {
+            $wrapper.html(`
+                <div class="alert alert-danger" style="margin:16px;">
+                    Failed to load users: ${frappe.utils.escape_html(err.message || "Unknown error")}
+                </div>
+            `);
+        });
+    }
+
+    function render_table() {
+        const $wrapper = d.fields_dict.user_mgmt_html.$wrapper;
+
+        let userRows = usersCache.map(u => {
             const roleBadge = u.role === "Admin"
-                ? '<span class="badge badge-primary" style="font-size:11px;padding:4px 8px;">Admin</span>'
-                : '<span class="badge badge-info" style="font-size:11px;padding:4px 8px;">Employee</span>';
+                ? '<span class="badge badge-primary" style="font-size:11px;padding:4px 8px;background:#3b82f6;color:#fff;">Admin</span>'
+                : (u.role === "CEO"
+                    ? '<span class="badge badge-dark" style="font-size:11px;padding:4px 8px;background:#7c3aed;color:#fff;">CEO</span>'
+                    : '<span class="badge badge-info" style="font-size:11px;padding:4px 8px;background:#0ea5e9;color:#fff;">Employee</span>');
 
             const statusBadge = u.is_active
-                ? '<span class="badge badge-success" style="font-size:11px;">Active</span>'
-                : '<span class="badge badge-secondary" style="font-size:11px;">Inactive</span>';
+                ? '<span class="badge badge-success" style="font-size:11px;background:#10b981;color:#fff;">Active</span>'
+                : '<span class="badge badge-secondary" style="font-size:11px;background:#64748b;color:#fff;">Inactive</span>';
+
+            const safeUser = frappe.utils.escape_html(u.user || "");
+            const safeName = frappe.utils.escape_html(u.full_name || u.user || "");
+            const safeEmail = frappe.utils.escape_html(u.email || u.user || "");
+            const safeDept = frappe.utils.escape_html(u.department_name || u.department || (u.role === "Admin" ? "All Departments" : "Unassigned"));
 
             return `
-                <tr>
-                    <td><strong>${u.full_name}</strong><br><small class="text-muted">${u.email}</small></td>
+                <tr data-user-row="${safeUser}">
+                    <td><strong>${safeName}</strong><br><small class="text-muted">${safeEmail}</small></td>
                     <td>${roleBadge}</td>
-                    <td><strong style="color:#0f172a;">${u.department_name || u.department || 'All Departments'}</strong></td>
+                    <td><strong style="color:#0f172a;">${safeDept}</strong></td>
                     <td>${statusBadge}</td>
                     <td style="font-size:12px;color:#64748b;">${u.last_login ? frappe.datetime.prettyDate(u.last_login) : 'Never'}</td>
                     <td class="text-right" style="white-space:nowrap;">
-                        <button class="btn btn-xs btn-default edit-user-btn" data-user='${JSON.stringify(u)}' style="font-weight:600;margin-right:4px;">
+                        <button type="button" class="btn btn-xs btn-default edit-user-btn" data-user="${safeUser}" style="font-weight:600;margin-right:4px;">
                             ✏️ Edit
                         </button>
-                        <button class="btn btn-xs ${u.is_active ? 'btn-default' : 'btn-success'} toggle-user-btn" data-user="${u.user}" data-active="${u.is_active}" style="font-weight:600;margin-right:4px;">
+                        <button type="button" class="btn btn-xs ${u.is_active ? 'btn-default' : 'btn-success'} toggle-user-btn" data-user="${safeUser}" data-active="${u.is_active}" style="font-weight:600;margin-right:4px;">
                             ${u.is_active ? 'Deactivate' : 'Activate'}
                         </button>
-                        <button class="btn btn-xs btn-danger delete-user-btn" data-user="${u.user}" data-name="${u.full_name}" style="font-weight:600;">
+                        <button type="button" class="btn btn-xs btn-danger delete-user-btn" data-user="${safeUser}" data-name="${safeName}" style="font-weight:600;">
                             🗑️ Delete
                         </button>
                     </td>
@@ -659,7 +775,7 @@ function show_user_management_modal(page) {
         let content = `
             <div style="padding:4px 0;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <span style="font-size:13px;color:#64748b;">Total Users: <strong>${users.length}</strong></span>
+                    <span style="font-size:13px;color:#64748b;">Total Users: <strong>${usersCache.length}</strong></span>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-bordered table-hover" style="font-size:13px;background:#fff;margin:0;">
@@ -681,75 +797,269 @@ function show_user_management_modal(page) {
             </div>
         `;
 
-        d.fields_dict.user_mgmt_html.$wrapper.html(content);
+        $wrapper.html(content);
 
         // Edit user button
-        d.fields_dict.user_mgmt_html.$wrapper.find(".edit-user-btn").on("click", function () {
-            const userObj = JSON.parse($(this).attr("data-user"));
-            d.hide();
-            show_edit_user_modal(userObj, page, () => show_user_management_modal(page));
+        $wrapper.find(".edit-user-btn").on("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const userKey = $(this).attr("data-user");
+            const userObj = usersMap[userKey];
+            if (!userObj) {
+                frappe.show_alert({ message: "User data not found", indicator: "red" });
+                return;
+            }
+            show_edit_user_modal(userObj, deptsCache, () => load_users_table());
         });
 
         // Toggle user status button
-        d.fields_dict.user_mgmt_html.$wrapper.find(".toggle-user-btn").on("click", function () {
-            const userEmail = $(this).data("user");
-            const currentActive = $(this).data("active");
+        $wrapper.find(".toggle-user-btn").on("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = $(this);
+            const userEmail = btn.attr("data-user");
+            const currentActive = parseInt(btn.attr("data-active") || 0);
             const newActive = currentActive ? 0 : 1;
+
+            btn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i>');
 
             frappe.xcall("productix.kpi_tracking.api.user_management.toggle_user_status", {
                 user: userEmail,
                 is_active: newActive,
             }).then(() => {
                 frappe.show_alert({ message: `User ${newActive ? 'activated' : 'deactivated'} successfully`, indicator: "green" });
-                d.hide();
-                show_user_management_modal(page);
+                load_users_table();
+            }).catch((err) => {
+                btn.prop("disabled", false).html(currentActive ? 'Deactivate' : 'Activate');
+                frappe.show_alert({ message: "Error: " + (err.message || "Failed"), indicator: "red" });
             });
         });
 
         // Delete user button
-        d.fields_dict.user_mgmt_html.$wrapper.find(".delete-user-btn").on("click", function () {
-            const userEmail = $(this).data("user");
-            const userName = $(this).data("name");
+        $wrapper.find(".delete-user-btn").on("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = $(this);
+            const userEmail = btn.attr("data-user");
+            const userName = btn.attr("data-name");
 
             frappe.confirm(
                 `Are you sure you want to delete user <b>${userName}</b> (${userEmail}) from the Company Tracking System? Historical data entries will remain preserved.`,
                 function () {
-                    frappe.xcall("productix.kpi_tracking.api.user_management.toggle_user_status", {
-                        user: userEmail,
-                        is_active: -1,
-                    }).catch(() => {
-                        return frappe.xcall("frappe.client.delete", {
-                            doctype: "User",
-                            name: userEmail,
-                        });
+                    btn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i>');
+                    frappe.xcall("productix.kpi_tracking.api.user_management.delete_kpi_user", {
+                        user_id: userEmail,
                     }).then(() => {
                         frappe.show_alert({ message: `✅ User ${userName} deleted successfully!`, indicator: "green" });
-                        d.hide();
-                        show_user_management_modal(page);
+                        load_users_table();
                     }).catch((err) => {
+                        btn.prop("disabled", false).html('🗑️ Delete');
                         frappe.show_alert({ message: "Error deleting user: " + (err.message || "Failed"), indicator: "red" });
                     });
                 }
             );
         });
-    });
+    }
+
+    d.show();
+    load_users_table();
 }
 
-function show_edit_user_modal(userObj, page, callback) {
-    frappe.xcall("productix.kpi_tracking.api.user_management.get_users").then((data) => {
-        const departments = data.departments || [];
+function show_edit_user_modal(userObj, departments, callback) {
+    let deptsWithKpis = null; // cache of {departments: [{name, display_name, kpis: []}]}
+
+    function load_depts_with_kpis() {
+        return new Promise((resolve) => {
+            if (deptsWithKpis) return resolve(deptsWithKpis);
+            frappe.xcall("productix.kpi_tracking.api.user_management.get_departments_with_kpis").then((data) => {
+                deptsWithKpis = (data && data.departments) || [];
+                resolve(deptsWithKpis);
+            }).catch(() => resolve([]));
+        });
+    }
+
+    // Renders the CEO configuration builder into the given $target
+    function render_ceo_builder($target, ceoConfig) {
+        const config = ceoConfig || { can_view_company_overview: 1, can_view_machines: 1 };
+        const scope = config.access_scope === "Selected Departments Only" ? "Selected Departments Only" : "All Departments";
+        const selDepts = (config.departments || []).filter(d => d && d.department);
+        const selKpis = (config.kpis || []).filter(k => k && k.kpi);
+        const selScope = {}; selDepts.forEach(d => { selScope[d.department] = d.access_level || "View All KPIs"; });
+        const selKpiSet = {}; selKpis.forEach(k => { selKpiSet[k.kpi] = k.department; });
+
+        let deptHtml = "";
+        (deptsWithKpis || []).forEach(d => {
+            const level = selScope[d.name] || "View All KPIs";
+            const kpiChecks = (d.kpis || []).map(k => {
+                const checked = selKpiSet[k.name] ? "checked" : "";
+                return `
+                    <label class="ceo-kpi-check" data-dept="${frappe.utils.escape_html(d.name)}" style="display:${level === 'View Specific KPIs' ? 'inline-flex' : 'none'}; align-items:center; gap:4px; margin-right:10px; font-size:12px; font-weight:400;">
+                        <input type="checkbox" class="ceo-kpi-cb" data-kpi="${frappe.utils.escape_html(k.name)}" data-dept="${frappe.utils.escape_html(d.name)}" ${checked}>
+                        ${frappe.utils.escape_html(k.kpi_name || k.name)}
+                    </label>
+                `;
+            }).join("");
+            deptHtml += `
+                <div class="ceo-dept-row" data-dept="${frappe.utils.escape_html(d.name)}" style="border:1px solid var(--border-color,#e2e8f0);border-radius:8px;padding:8px 10px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                        <label style="margin:0;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;">
+                            <input type="checkbox" class="ceo-dept-cb" data-dept="${frappe.utils.escape_html(d.name)}" ${selScope[d.name] ? "checked" : ""}>
+                            ${frappe.utils.escape_html(d.display_name || d.department_name || d.name)}
+                        </label>
+                        <select class="form-control form-control-sm ceo-dept-level" data-dept="${frappe.utils.escape_html(d.name)}" style="width:auto;">
+                            <option value="View All KPIs" ${level === "View All KPIs" ? "selected" : ""}>View All KPIs</option>
+                            <option value="View Specific KPIs" ${level === "View Specific KPIs" ? "selected" : ""}>View Specific KPIs</option>
+                            <option value="View Summary Only" ${level === "View Summary Only" ? "selected" : ""}>View Summary Only</option>
+                        </select>
+                    </div>
+                    <div class="mt-2" style="display:${selScope[d.name] ? 'block' : 'none'};">
+                        ${kpiChecks || '<span class="text-muted" style="font-size:11px;">No active KPIs in this department.</span>'}
+                    </div>
+                </div>
+            `;
+        });
+
+        $target.html(`
+            <div style="padding:2px 0;">
+                <div class="form-group">
+                    <label style="font-weight:600;font-size:12px;">Access Scope</label>
+                    <select class="form-control ceo-scope">
+                        <option value="All Departments" ${scope === "All Departments" ? "selected" : ""}>All Departments</option>
+                        <option value="Selected Departments Only" ${scope === "Selected Departments Only" ? "selected" : ""}>Selected Departments Only</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label style="font-weight:600;font-size:12px;display:block;margin-bottom:4px;">Capabilities</label>
+                    <label style="font-weight:400;font-size:12px;margin-right:14px;display:inline-flex;gap:4px;">
+                        <input type="checkbox" class="ceo-can-overview" ${config.can_view_company_overview ? "checked" : ""}> Company Overview
+                    </label>
+                    <label style="font-weight:400;font-size:12px;display:inline-flex;gap:4px;">
+                        <input type="checkbox" class="ceo-can-machines" ${config.can_view_machines ? "checked" : ""}> Machine Health
+                    </label>
+                </div>
+                <div style="font-weight:600;font-size:12px;margin:10px 0 6px;">Department Access</div>
+                <div id="ceo-dept-list" style="max-height:260px;overflow:auto;padding-right:4px;">${deptHtml || '<div class="text-muted" style="font-size:12px;">No active departments found.</div>'}</div>
+            </div>
+        `);
+
+        // Bind: scope show/hide of departments section
+        $target.find(".ceo-scope").on("change", function() {
+            const scopeVal = $(this).val();
+            $target.find("#ceo-dept-list").css("display", scopeVal === "Selected Departments Only" ? "block" : "none");
+        }).trigger("change");
+
+        // Bind: dept checkbox toggles KPI area + level select
+        $target.find(".ceo-dept-cb").on("change", function() {
+            const dept = $(this).data("dept");
+            const checked = $(this).is(":checked");
+            const $row = $target.find(`.ceo-dept-row[data-dept="${dept}"]`);
+            $row.find(".ceo-kpi-check").css("display", checked && $row.find(".ceo-dept-level").val() === "View Specific KPIs" ? "inline-flex" : "none");
+            $row.find(".ceo-dept-level").prop("disabled", !checked).css("opacity", checked ? 1 : 0.5);
+        });
+
+        // Bind: level select shows KPI checkboxes when "View Specific KPIs"
+        $target.find(".ceo-dept-level").on("change", function() {
+            const dept = $(this).data("dept");
+            const level = $(this).val();
+            $target.find(`.ceo-kpi-check[data-dept="${dept}"]`).css("display", level === "View Specific KPIs" ? "inline-flex" : "none");
+        });
+
+        // Init disabled state
+        $target.find(".ceo-dept-level").each(function() {
+            const dept = $(this).data("dept");
+            const checked = $target.find(`.ceo-dept-cb[data-dept="${dept}"]`).is(":checked");
+            $(this).prop("disabled", !checked).css("opacity", checked ? 1 : 0.5);
+        });
+    }
+
+    // Collects the CEO config from the builder into a plain object
+    function collect_ceo_config($target) {
+        const scopeVal = $target.find(".ceo-scope").val() || "All Departments";
+        const departments = [];
+        $target.find(".ceo-dept-cb:checked").each(function() {
+            const dept = $(this).data("dept");
+            const level = $target.find(`.ceo-dept-level[data-dept="${dept}"]`).val() || "View All KPIs";
+            departments.push({ department: dept, access_level: level });
+        });
+        const kpis = [];
+        $target.find(".ceo-kpi-cb:checked").each(function() {
+            kpis.push({ department: $(this).data("dept"), kpi: $(this).data("kpi") });
+        });
+        return {
+            access_scope: scopeVal,
+            can_view_company_overview: $target.find(".ceo-can-overview").is(":checked") ? 1 : 0,
+            can_view_machines: $target.find(".ceo-can-machines").is(":checked") ? 1 : 0,
+            departments: departments,
+            kpis: kpis
+        };
+    }
+
+    function open_dialog(depts) {
         const isEdit = !!userObj;
+        const deptOptions = ["", ...depts.map(d => d.name)];
+        const isCeoUser = userObj && userObj.role === "CEO";
+        const ceoConfig = (userObj && userObj.ceo_config) || null;
 
         const d = new frappe.ui.Dialog({
-            title: isEdit ? `✏️ Edit User — ${userObj.full_name}` : "➕ Create New User",
-            size: "large",
+            title: isEdit ? `✏️ Edit User — ${frappe.utils.escape_html(userObj.full_name || userObj.user)}` : "➕ Create New User",
+            size: "extra-large",
             fields: [
-                { fieldtype: "Data", fieldname: "full_name", label: "Full Name", reqd: 1, default: userObj ? userObj.full_name : "" },
-                { fieldtype: "Data", fieldname: "email", label: "Email Address (Login ID)", reqd: 1, options: "Email", default: userObj ? userObj.email : "", read_only: isEdit ? 1 : 0 },
-                { fieldtype: "Select", fieldname: "role", label: "Role", reqd: 1, options: "Employee\nAdmin", default: userObj ? userObj.role : "Employee" },
-                { fieldtype: "Select", fieldname: "department", label: "Assigned Department (for Employee)", options: "\n" + departments.map(d => d.name).join('\n'), default: userObj ? userObj.department : (departments[0] ? departments[0].name : "") },
-                { fieldtype: "Password", fieldname: "new_password", label: isEdit ? "Reset Password (leave empty to keep current)" : "Password", reqd: isEdit ? 0 : 1 },
-                { fieldtype: "Check", fieldname: "is_active", label: "Active User", default: userObj ? userObj.is_active : 1 },
+                {
+                    fieldtype: "Data",
+                    fieldname: "full_name",
+                    label: "Full Name",
+                    reqd: 1,
+                    default: userObj ? userObj.full_name : ""
+                },
+                {
+                    fieldtype: "Data",
+                    fieldname: "email",
+                    label: "Email Address (Login ID)",
+                    reqd: 1,
+                    options: "Email",
+                    default: userObj ? (userObj.email || userObj.user) : "",
+                    read_only: isEdit ? 1 : 0
+                },
+                {
+                    fieldtype: "Select",
+                    fieldname: "role",
+                    label: "Role",
+                    reqd: 1,
+                    options: "Employee\nAdmin\nCEO",
+                    default: userObj ? (userObj.role === "Admin" ? "Admin" : (userObj.role === "CEO" ? "CEO" : "Employee")) : "Employee"
+                },
+                {
+                    fieldtype: "Select",
+                    fieldname: "department",
+                    label: "Assigned Department (for Employee)",
+                    options: deptOptions.join('\n'),
+                    default: userObj ? userObj.department : (depts[0] ? depts[0].name : "")
+                },
+                {
+                    fieldtype: "Password",
+                    fieldname: "new_password",
+                    label: isEdit ? "Reset Password (leave empty to keep current)" : "Password",
+                    reqd: isEdit ? 0 : 1
+                },
+                {
+                    fieldtype: "Check",
+                    fieldname: "is_active",
+                    label: "Active User",
+                    default: userObj ? (userObj.is_active ? 1 : 0) : 1
+                },
+                {
+                    fieldtype: "Section Break",
+                    fieldname: "ceo_section",
+                    label: "CEO Access Configuration"
+                },
+                {
+                    fieldtype: "Column Break",
+                    fieldname: "ceo_col_break"
+                },
+                {
+                    fieldtype: "HTML",
+                    fieldname: "ceo_config_html"
+                },
             ],
             primary_action_label: isEdit ? "Save Changes" : "Create User",
             primary_action: function (values) {
@@ -758,42 +1068,91 @@ function show_edit_user_modal(userObj, page, callback) {
                     return;
                 }
 
-                frappe.xcall("productix.kpi_tracking.api.user_management.save_user", {
+                d.get_primary_btn().prop("disabled", true);
+
+                const args = {
                     user_id: userObj ? userObj.user : null,
                     email: values.email,
                     full_name: values.full_name,
                     role: values.role,
                     department: values.department,
                     new_password: values.new_password,
-                    is_active: values.is_active,
-                }).then((res) => {
+                    is_active: values.is_active ? 1 : 0,
+                };
+
+                if (values.role === "CEO") {
+                    const $ceoWrap = d.fields_dict.ceo_config_html.$wrapper;
+                    args.ceo_access = JSON.stringify(collect_ceo_config($ceoWrap));
+                }
+
+                frappe.xcall("productix.kpi_tracking.api.user_management.save_user", args).then((res) => {
                     frappe.show_alert({ message: `✅ User ${values.full_name} saved successfully!`, indicator: "green" });
                     d.hide();
                     if (callback) callback();
                 }).catch((err) => {
+                    d.get_primary_btn().prop("disabled", false);
                     frappe.show_alert({ message: "Error: " + (err.message || "Failed to save user"), indicator: "red" });
                 });
             }
         });
 
-        d.onhide = function () {
-            setTimeout(() => {
-                if (d.$wrapper) {
-                    d.$wrapper.remove();
+        function update_ceo_section_visibility() {
+            const role = d.get_value("role");
+            // Note: frappe.ui.Dialog has no toggle()/toggle_display(), so drive the
+            // field wrappers directly.
+            ["ceo_section", "ceo_col_break", "ceo_config_html"].forEach(function (fn) {
+                const f = d.fields_dict[fn];
+                if (f && f.wrapper) {
+                    $(f.wrapper).toggle(role === "CEO");
                 }
-                $(".modal-backdrop").remove();
-            }, 100);
-        };
-
-        d.fields_dict.role.$input.on("change", function () {
-            const role = $(this).val();
+            });
             if (role === "Admin") {
                 d.set_df_property("department", "reqd", 0);
+                d.set_df_property("department", "hidden", 1);
+            } else if (role === "CEO") {
+                d.set_df_property("department", "reqd", 0);
+                d.set_df_property("department", "hidden", 1);
             } else {
                 d.set_df_property("department", "reqd", 1);
+                d.set_df_property("department", "hidden", 0);
+            }
+        }
+
+        d.fields_dict.role.$input.on("change", function() {
+            update_ceo_section_visibility();
+            if (d.get_value("role") === "CEO" && deptsWithKpis) {
+                const $ceoWrap = d.fields_dict.ceo_config_html.$wrapper;
+                render_ceo_builder($ceoWrap, ceoConfig);
             }
         });
 
+        // Hide CEO section by default; pre-render when editing a CEO or role pre-set
+        if (isCeoUser || (userObj && userObj.role === "CEO")) {
+            load_depts_with_kpis().then(() => {
+                const $ceoWrap = d.fields_dict.ceo_config_html.$wrapper;
+                render_ceo_builder($ceoWrap, ceoConfig);
+                update_ceo_section_visibility();
+            });
+        } else {
+            update_ceo_section_visibility();
+            load_depts_with_kpis().then(() => {
+                if (d.get_value("role") === "CEO") {
+                    const $ceoWrap = d.fields_dict.ceo_config_html.$wrapper;
+                    render_ceo_builder($ceoWrap, ceoConfig);
+                }
+            });
+        }
+
         d.show();
-    });
+    }
+
+    if (departments && departments.length) {
+        open_dialog(departments);
+    } else {
+        frappe.xcall("productix.kpi_tracking.api.user_management.get_users").then((data) => {
+            open_dialog((data && data.departments) || []);
+        }).catch(() => {
+            open_dialog([]);
+        });
+    }
 }

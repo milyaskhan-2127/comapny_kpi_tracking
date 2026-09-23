@@ -1,5 +1,161 @@
 import frappe
 import json
+import re
+
+
+import frappe
+import json
+import re
+
+CANONICAL_DEPT_MAP = {
+    "PROD": "PRODUCTION",
+    "PRODUCTION": "PRODUCTION",
+    "DEP_PRODUCTION": "PRODUCTION",
+    "FIN": "FINANCE",
+    "FINANCE": "FINANCE",
+    "ACCOUNTING": "FINANCE",
+    "ACCOUNTS": "FINANCE",
+    "DEP_FINANCE": "FINANCE",
+    "QC": "QC",
+    "QUALITY": "QC",
+    "QUALITY_CONTROL": "QC",
+    "QA": "QC",
+    "DEP_QC": "QC",
+    "SC": "SUPPLY_CHAIN",
+    "SUPPLY_CHAIN": "SUPPLY_CHAIN",
+    "LOGISTICS": "SUPPLY_CHAIN",
+    "DEP_SUPPLY_CHAIN": "SUPPLY_CHAIN",
+    "MAINT": "MAINTENANCE",
+    "MAINTENANCE": "MAINTENANCE",
+    "DEP_MAINTENANCE": "MAINTENANCE",
+    "CS": "CUSTOMER_SUCCESS",
+    "CUSTOMER_SUPPORT": "CUSTOMER_SUCCESS",
+    "CUSTOMER_SUCCESS": "CUSTOMER_SUCCESS",
+    "SUPPORT": "CUSTOMER_SUCCESS",
+    "CUSTOMER_SERVICE": "CUSTOMER_SUCCESS",
+    "DEP_CUSTOMER_SUCCESS": "CUSTOMER_SUCCESS",
+    "HR": "HR",
+    "HUMAN_RESOURCES": "HR",
+    "DEP_HR": "HR",
+    "SALES": "SALES",
+    "DEP_SALES": "SALES",
+    "SAFETY": "SAFETY",
+    "EHS": "SAFETY",
+    "DEP_SAFETY": "SAFETY",
+    "RND": "RND",
+    "RD": "RND",
+    "RESEARCH": "RND",
+    "DEP_RND": "RND",
+    "PROCUREMENT": "PROCUREMENT",
+    "PURCHASING": "PROCUREMENT",
+    "DEP_PROCUREMENT": "PROCUREMENT",
+}
+
+
+def _clean_department_code(code_or_name):
+    """Sanitize department code to adhere to ^[A-Z][A-Z0-9_]*$ without collapsing distinct departments."""
+    raw = (code_or_name or "").upper().strip()
+    raw = raw.replace("&", "AND").replace("-", "_").replace(" ", "_")
+    cleaned = re.sub(r'[^A-Z0-9_]', '', raw)
+    cleaned = re.sub(r'_+', '_', cleaned).strip('_')
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = f"DEP_{cleaned}" if cleaned else "DEP_NEW"
+
+    # Only map exact standard alias keywords when they are single-token or DEP_ prefixed
+    # Never collapse user-disambiguated sub-departments like SALES_B1, SALES_BLOCK_2, etc.
+    if cleaned in CANONICAL_DEPT_MAP and ("_" not in cleaned or cleaned.startswith("DEP_")):
+        return CANONICAL_DEPT_MAP[cleaned]
+    return cleaned
+
+
+def consolidate_duplicate_departments():
+    """
+    Consolidates exact duplicate KPI Department records (e.g. duplicate primary keys
+    or legacy naming conflicts) without merging distinct user-created departments.
+    """
+    all_depts = frappe.db.get_all(
+        "KPI Department",
+        fields=["name", "department_name", "department_code", "is_active", "weight", "description", "location", "creation"],
+        order_by="creation asc"
+    )
+    if not all_depts:
+        return
+
+    # Group strictly by exact normalized department_code or primary key name
+    dept_groups = {}
+    for d in all_depts:
+        code = (d.department_code or d.name or "").strip().upper()
+        if code not in dept_groups:
+            dept_groups[code] = []
+        dept_groups[code].append(d)
+
+    for code, depts in dept_groups.items():
+        if len(depts) <= 1:
+            d = depts[0]
+            if not d.department_code:
+                clean_code = _clean_department_code(d.name)
+                frappe.db.set_value("KPI Department", d.name, "department_code", clean_code, update_modified=False)
+            continue
+
+        # Truly duplicate departments sharing the exact same code
+        primary = None
+        for d in depts:
+            if d.name == code:
+                primary = d
+                break
+        if not primary:
+            active_ones = [d for d in depts if d.is_active]
+            primary = active_ones[0] if active_ones else depts[0]
+
+        primary_name = primary.name
+        is_active_flag = 1 if any(d.is_active for d in depts) else 0
+        max_weight = max((float(d.weight or 1.0) for d in depts), default=1.0)
+        best_dept_name = primary.department_name or primary.name
+        best_location = primary.get("location") or next((d.get("location") for d in depts if d.get("location")), "")
+
+        if primary_name != code and not frappe.db.exists("KPI Department", code):
+            try:
+                frappe.rename_doc("KPI Department", primary_name, code, force=True, ignore_permissions=True)
+                primary_name = code
+            except Exception:
+                pass
+
+        frappe.db.set_value("KPI Department", primary_name, {
+            "department_code": code,
+            "department_name": best_dept_name,
+            "is_active": is_active_flag,
+            "weight": max_weight,
+            "location": best_location,
+        }, update_modified=False)
+
+        duplicate_names = [d.name for d in depts if d.name != primary_name]
+        for dup_name in duplicate_names:
+            child_doctypes = [
+                ("KPI Definition", "department"),
+                ("KPI Data Entry", "department"),
+                ("KPI Alert", "department"),
+                ("KPI Prediction", "department"),
+                ("KPI User Assignment", "department"),
+                ("KPI Operational Table", "department"),
+                ("Machine", "department"),
+            ]
+            for dt, field in child_doctypes:
+                try:
+                    if frappe.db.table_exists(f"tab{dt}"):
+                        frappe.db.sql(f"""
+                            UPDATE `tab{dt}`
+                            SET `{field}` = %s
+                            WHERE `{field}` = %s
+                        """, (primary_name, dup_name))
+                except Exception:
+                    pass
+
+            try:
+                frappe.db.sql("DELETE FROM `tabKPI Department` WHERE name = %s", (dup_name,))
+            except Exception:
+                pass
+
+    frappe.db.commit()
 
 
 @frappe.whitelist()
@@ -8,6 +164,12 @@ def get_setup_status():
     role = _check_kpi_access()
     if role not in ("KPI Admin",) and "System Manager" not in frappe.get_roles():
         frappe.throw("Only admins can view setup status", frappe.PermissionError)
+
+    # Clean up duplicate departments first
+    try:
+        consolidate_duplicate_departments()
+    except Exception:
+        pass
 
     settings = frappe.get_cached_doc("KPI Settings")
     dept_count = frappe.db.count("KPI Department", {"is_active": 1})
@@ -18,6 +180,30 @@ def get_setup_status():
     variable_count = frappe.db.count("KPI Variable")
     formula_count = frappe.db.count("KPI Formula", {"is_active": 1})
     op_table_count = frappe.db.count("KPI Operational Table", {"is_active": 1})
+
+    # Fetch all existing departments with live KPI counts
+    raw_departments = frappe.get_all(
+        "KPI Department",
+        fields=["name", "department_name", "department_code", "is_active", "weight", "description", "location"],
+        order_by="department_name asc",
+    )
+    dept_kpis = frappe.db.sql("""
+        SELECT department, COUNT(name) as count
+        FROM `tabKPI Definition`
+        WHERE is_active = 1
+        GROUP BY department
+    """, as_dict=True)
+    kpi_count_map = {d.department: d.count for d in dept_kpis}
+
+    seen = set()
+    departments = []
+    for d in raw_departments:
+        code_key = (d.department_code or d.name or "").upper().strip()
+        if code_key in seen:
+            continue
+        seen.add(code_key)
+        d["kpi_count"] = kpi_count_map.get(d.name, 0)
+        departments.append(d)
 
     companies = frappe.get_all("Company", fields=["name", "company_name", "default_currency", "country"], order_by="creation desc")
     fiscal_years = frappe.get_all("Fiscal Year", fields=["name"], order_by="year_start_date desc")
@@ -73,6 +259,7 @@ def get_setup_status():
         "companies": [c.name for c in companies],
         "fiscal_years": [f.name for f in fiscal_years],
         "currencies": all_currencies,
+        "departments": departments,
     }
 
 
@@ -134,21 +321,6 @@ def setup_company(company, fiscal_year=None, currency=None, default_frequency="D
     settings.default_frequency = default_frequency
     settings.save(ignore_permissions=True)
 
-    # Dynamically sync all active KPI Definitions and Template Items to the chosen Company Frequency
-    try:
-        frappe.db.sql(
-            "UPDATE `tabKPI Definition` SET frequency = %s WHERE is_active = 1",
-            (default_frequency,)
-        )
-        frappe.db.sql(
-            "UPDATE `tabKPI Template Item` SET default_frequency = %s",
-            (default_frequency,)
-        )
-        frappe.db.commit()
-        frappe.clear_cache()
-    except Exception:
-        pass
-
     return {
         "status": "ok",
         "company": company_name,
@@ -158,41 +330,185 @@ def setup_company(company, fiscal_year=None, currency=None, default_frequency="D
     }
 
 
+TEMPLATE_CODE_MAP = {
+    "SALES": ["SALES", "Sales", "DEP_SALES"],
+    "PRODUCTION": ["PRODUCTION", "Production", "DEP_PRODUCTION", "PROD"],
+    "QC": ["QC", "Quality Control", "Quality Assurance & Control", "QUALITY_CONTROL", "QUALITY", "DEP_QC"],
+    "SAFETY": ["SAFETY", "Safety", "EHS", "DEP_SAFETY"],
+    "PROCUREMENT": ["PROCUREMENT", "Procurement", "Purchasing", "DEP_PROCUREMENT"],
+    "SUPPLY_CHAIN": ["SUPPLY_CHAIN", "Supply Chain", "Logistics", "DEP_SUPPLY_CHAIN", "SC"],
+    "RND": ["RND", "R&D", "Research & Development", "RD", "DEP_RND"],
+    "FINANCE": ["FINANCE", "Finance", "Accounting", "ACCOUNTS", "DEP_FINANCE", "FIN"],
+    "HR": ["HR", "Human Resources", "HUMAN_RESOURCES", "DEP_HR"],
+    "CUSTOMER_SUCCESS": ["CUSTOMER_SUCCESS", "Customer Support & Success", "Customer Success", "Customer Support", "Support", "CS", "DEP_CUSTOMER_SUCCESS", "CUSTOMER_SUPPORT"],
+}
+
+
 @frappe.whitelist()
 def setup_departments(departments):
+    """
+    Create or activate/update multiple operational departments safely.
+    Handles code sanitization, duplicate lookup, and status/weight synchronization.
+    Supports location/block disambiguation.
+    """
     from productix.kpi_tracking.api.dashboard import _check_kpi_access
     role = _check_kpi_access()
     if role != "KPI Admin" and "System Manager" not in frappe.get_roles():
-        frappe.throw("Only admins can create departments", frappe.PermissionError)
+        frappe.throw("Only admins can create or update departments", frappe.PermissionError)
+
+    # First clean up any existing duplicate records in database
+    consolidate_duplicate_departments()
 
     if isinstance(departments, str):
         departments = json.loads(departments)
 
     created = []
     for dept in departments:
-        code = dept.get("code") or dept.get("name", "").upper().replace(" ", "_")
+        name = (dept.get("name") or dept.get("department_name") or "").strip()
+        raw_code = (dept.get("code") or dept.get("department_code") or "").strip()
+        code = _clean_department_code(raw_code or name)
+        name = name or code
+
         weight = float(dept.get("weight") or 1.0)
-        name = dept.get("name") or code
+        is_active = 1 if int(dept.get("is_active", 1)) else 0
+        desc = dept.get("description", "")
+        loc = (dept.get("location") or "").strip()
 
-        if frappe.db.exists("KPI Department", code):
-            # Ensure it is active with proper weight
-            frappe.db.set_value("KPI Department", code, {"is_active": 1, "weight": weight, "department_name": name})
-            created.append(code)
-            continue
+        # Look for existing department strictly by primary key name or department_code
+        existing_names = frappe.db.sql("""
+            SELECT name FROM `tabKPI Department`
+            WHERE name = %s OR department_code = %s
+        """, (code, code), as_dict=True)
 
-        doc = frappe.get_doc({
-            "doctype": "KPI Department",
-            "department_name": name,
-            "department_code": code,
-            "description": dept.get("description", ""),
-            "is_active": 1,
-            "weight": weight,
-        })
-        doc.insert(ignore_permissions=True)
-        created.append(doc.name)
+        if existing_names:
+            for en in existing_names:
+                doc = frappe.get_doc("KPI Department", en.name)
+                doc.department_name = name
+                doc.department_code = code
+                doc.weight = weight
+                doc.is_active = is_active
+                if loc:
+                    doc.location = loc
+                if desc:
+                    doc.description = desc
+                doc.save(ignore_permissions=True)
+                if doc.name not in created:
+                    created.append(doc.name)
+        else:
+            doc = frappe.get_doc({
+                "doctype": "KPI Department",
+                "department_name": name,
+                "department_code": code,
+                "location": loc,
+                "description": desc,
+                "is_active": is_active,
+                "weight": weight,
+            })
+            doc.insert(ignore_permissions=True)
+            created.append(doc.name)
 
     frappe.db.commit()
-    return {"created": created}
+    return {"created": created, "count": len(created)}
+
+
+@frappe.whitelist()
+def create_or_update_department(department_name, department_code=None, weight=1.0, is_active=1, description=None, location=None):
+    """Create or update a single KPI Department with automatic code validation, location disambiguation, and duplicate protection."""
+    from productix.kpi_tracking.api.dashboard import _check_kpi_access
+    role = _check_kpi_access()
+    if role != "KPI Admin" and "System Manager" not in frappe.get_roles():
+        frappe.throw("Only admins can manage departments", frappe.PermissionError)
+
+    department_name = (department_name or "").strip()
+    if not department_name:
+        frappe.throw("Department Name is required")
+
+    code = _clean_department_code(department_code or department_name)
+    weight = float(weight or 1.0)
+    is_active_int = 1 if int(is_active) else 0
+    loc = (location or "").strip()
+
+    # Look for existing department strictly by primary key name or department_code
+    existing_names = frappe.db.sql("""
+        SELECT name FROM `tabKPI Department`
+        WHERE name = %s OR department_code = %s
+    """, (code, code), as_dict=True)
+
+    if existing_names:
+        for en in existing_names:
+            doc = frappe.get_doc("KPI Department", en.name)
+            doc.department_name = department_name
+            doc.department_code = code
+            doc.weight = weight
+            doc.is_active = is_active_int
+            if loc:
+                doc.location = loc
+            if description is not None:
+                doc.description = description
+            doc.save(ignore_permissions=True)
+    else:
+        doc = frappe.get_doc({
+            "doctype": "KPI Department",
+            "department_name": department_name,
+            "department_code": code,
+            "location": loc,
+            "weight": weight,
+            "is_active": is_active_int,
+            "description": description or "",
+        })
+        doc.insert(ignore_permissions=True)
+
+    frappe.db.commit()
+    return {
+        "status": "ok",
+        "name": doc.name,
+        "department_name": doc.department_name,
+        "department_code": doc.department_code,
+        "location": doc.location,
+        "is_active": doc.is_active,
+        "weight": doc.weight,
+    }
+
+
+@frappe.whitelist()
+def toggle_department_active(department, is_active=None):
+    """Toggle or set the active status of a KPI Department."""
+    from productix.kpi_tracking.api.dashboard import _check_kpi_access
+    role = _check_kpi_access()
+    if role != "KPI Admin" and "System Manager" not in frappe.get_roles():
+        frappe.throw("Only admins can toggle department status", frappe.PermissionError)
+
+    consolidate_duplicate_departments()
+
+    code = _clean_department_code(department)
+    matching_names = frappe.db.sql("""
+        SELECT name FROM `tabKPI Department`
+        WHERE name = %s OR department_code = %s
+    """, (department, code), as_dict=True)
+
+    if not matching_names:
+        frappe.throw(f"Department '{department}' does not exist.", frappe.DoesNotExistError)
+
+    first_doc = None
+    for item in matching_names:
+        doc = frappe.get_doc("KPI Department", item.name)
+        if is_active is None:
+            doc.is_active = 0 if doc.is_active else 1
+        else:
+            doc.is_active = 1 if int(is_active) else 0
+        doc.save(ignore_permissions=True)
+        if not first_doc:
+            first_doc = doc
+
+    frappe.db.commit()
+
+    return {
+        "status": "ok",
+        "name": first_doc.name,
+        "department_name": first_doc.department_name,
+        "location": first_doc.location,
+        "is_active": first_doc.is_active,
+    }
 
 
 @frappe.whitelist()
@@ -283,10 +599,13 @@ def create_default_templates():
         "FINANCE": {
             "name": "Finance KPI Template",
             "items": [
-                {"kpi_name": "Operating Margin", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 22},
-                {"kpi_name": "Budget Variance", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 3},
-                {"kpi_name": "Operating Cash Flow", "measurement_type": "Currency", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 250000},
+                {"kpi_name": "Operating Margin", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 24},
+                {"kpi_name": "Gross Profit Margin", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 42},
+                {"kpi_name": "Operating Cash Flow", "measurement_type": "Currency", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 500000},
                 {"kpi_name": "Days Sales Outstanding", "measurement_type": "Duration", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 35},
+                {"kpi_name": "Budget Variance", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 3.0},
+                {"kpi_name": "Operating Expense Ratio", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 28},
+                {"kpi_name": "EBITDA Margin", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 26},
             ],
         },
         "HR": {
@@ -298,13 +617,35 @@ def create_default_templates():
                 {"kpi_name": "Time-to-Fill Key Roles", "measurement_type": "Duration", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 20},
             ],
         },
+        "CUSTOMER_SUCCESS": {
+            "name": "Customer Support & Success KPI Template",
+            "items": [
+                {"kpi_name": "Customer Satisfaction Score", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 92},
+                {"kpi_name": "First Contact Resolution", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 80},
+                {"kpi_name": "Ticket Resolution Time", "measurement_type": "Duration", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 4},
+                {"kpi_name": "Net Promoter Score", "measurement_type": "Number", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 65},
+                {"kpi_name": "Customer Churn Rate", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 2.0},
+                {"kpi_name": "Ticket Escalation Rate", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Lower is Better", "default_target": 5.0},
+                {"kpi_name": "Customer Retention Rate", "measurement_type": "Percentage", "default_frequency": default_freq, "direction": "Higher is Better", "default_target": 95},
+            ],
+        },
     }
 
     created = []
     for code, tmpl in templates.items():
         if frappe.db.exists("KPI Template", code):
+            doc = frappe.get_doc("KPI Template", code)
+            existing_names = {i.kpi_name for i in doc.items}
+            has_changes = False
+            for item in tmpl["items"]:
+                if item["kpi_name"] not in existing_names:
+                    doc.append("items", item)
+                    has_changes = True
+            if has_changes:
+                doc.save(ignore_permissions=True)
             created.append(code)
             continue
+
         doc = frappe.get_doc({
             "doctype": "KPI Template",
             "template_name": tmpl["name"],
@@ -327,21 +668,48 @@ def apply_all_default_templates():
         frappe.throw("Only admins can apply templates", frappe.PermissionError)
 
     create_default_templates()
-    templates = frappe.get_all("KPI Template", filters={"is_active": 1}, pluck="name")
+    consolidate_duplicate_departments()
+
+    active_depts = frappe.get_all(
+        "KPI Department",
+        filters={"is_active": 1},
+        fields=["name", "department_name", "department_code"]
+    )
+
+    templates = frappe.get_all("KPI Template", filters={"is_active": 1}, fields=["name", "template_code", "template_name"])
+    applied_templates = []
     total_kpis = []
 
-    for tmpl_code in templates:
-        if frappe.db.exists("KPI Department", tmpl_code):
-            template = frappe.get_doc("KPI Template", tmpl_code)
-            created = template.apply_template(tmpl_code)
-            total_kpis.extend(created)
+    for dept in active_depts:
+        matched_tmpl = None
+        dept_name_norm = (dept.department_name or "").strip().lower()
+        dept_code_norm = (dept.department_code or dept.name or "").strip().upper()
 
-    return {"applied_templates": templates, "created_kpis": total_kpis, "count": len(total_kpis)}
+        for tmpl in templates:
+            t_code = (tmpl.template_code or tmpl.name).upper()
+            aliases = [a.lower() for a in TEMPLATE_CODE_MAP.get(t_code, [t_code])]
+            if (dept_code_norm == t_code or
+                dept_code_norm in [a.upper() for a in TEMPLATE_CODE_MAP.get(t_code, [])] or
+                dept_name_norm in aliases or
+                t_code in dept_code_norm or
+                dept_code_norm in t_code):
+                matched_tmpl = tmpl
+                break
+
+        if matched_tmpl:
+            template_doc = frappe.get_doc("KPI Template", matched_tmpl.name)
+            created = template_doc.apply_template(dept.name)
+            total_kpis.extend(created)
+            if matched_tmpl.name not in applied_templates:
+                applied_templates.append(matched_tmpl.name)
+
+    frappe.db.commit()
+    return {"applied_templates": applied_templates, "created_kpis": total_kpis, "count": len(total_kpis)}
 
 
 @frappe.whitelist()
 def one_click_quick_setup(company_name=None, currency="PKR"):
-    """One-click setup for admin: auto-configures Company, 9 Departments, Templates, and initial KPIs."""
+    """One-click setup for admin: auto-configures Company, 10 Departments, Templates, and initial KPIs."""
     from productix.kpi_tracking.api.dashboard import _check_kpi_access
     role = _check_kpi_access()
     if role != "KPI Admin" and "System Manager" not in frappe.get_roles():
@@ -349,26 +717,65 @@ def one_click_quick_setup(company_name=None, currency="PKR"):
 
     # 1. Company with PKR / chosen currency
     companies = frappe.get_all("Company", pluck="name")
-    chosen_company = company_name or (companies[0] if companies else "Apex Chemical Industries")
+    chosen_company = company_name or (companies[0] if companies else None)
+    if not chosen_company:
+        chosen_company = frappe.db.get_single_value("Global Defaults", "default_company") or "Company"
     setup_company(chosen_company, currency=currency)
 
-    # 2. All 9 Departments
-    all_9_depts = [
-        {"name": "Production", "code": "PRODUCTION", "weight": 1.5},
-        {"name": "Quality Control", "code": "QC", "weight": 1.3},
-        {"name": "Safety", "code": "SAFETY", "weight": 1.0},
-        {"name": "Procurement", "code": "PROCUREMENT", "weight": 1.0},
-        {"name": "Supply Chain", "code": "SUPPLY_CHAIN", "weight": 1.1},
-        {"name": "Sales", "code": "SALES", "weight": 1.2},
-        {"name": "R&D", "code": "RND", "weight": 1.0},
-        {"name": "Finance", "code": "FINANCE", "weight": 1.1},
-        {"name": "Human Resources", "code": "HR", "weight": 1.0},
+    # 2. All 10 Standard Departments
+    all_10_depts = [
+        {"name": "Production", "code": "PRODUCTION", "weight": 1.5, "is_active": 1},
+        {"name": "Quality Control", "code": "QC", "weight": 1.3, "is_active": 1},
+        {"name": "Safety", "code": "SAFETY", "weight": 1.0, "is_active": 1},
+        {"name": "Procurement", "code": "PROCUREMENT", "weight": 1.0, "is_active": 1},
+        {"name": "Supply Chain", "code": "SUPPLY_CHAIN", "weight": 1.1, "is_active": 1},
+        {"name": "Sales", "code": "SALES", "weight": 1.2, "is_active": 1},
+        {"name": "R&D", "code": "RND", "weight": 1.0, "is_active": 1},
+        {"name": "Finance", "code": "FINANCE", "weight": 1.1, "is_active": 1},
+        {"name": "Human Resources", "code": "HR", "weight": 1.0, "is_active": 1},
+        {"name": "Customer Support & Success", "code": "CUSTOMER_SUCCESS", "weight": 1.1, "is_active": 1},
     ]
-    setup_departments(all_9_depts)
+    setup_departments(all_10_depts)
 
-    # 3. Templates & KPIs for all 9 departments
+    # 3. Templates & KPIs for all 10 departments
     create_default_templates()
     apply_res = apply_all_default_templates()
+
+    # 4. Complete Setup
+    settings = frappe.get_doc("KPI Settings")
+    settings.setup_completed = 1
+    settings.currency = currency
+    settings.save(ignore_permissions=True)
+
+    return {
+        "status": "ok",
+        "company": chosen_company,
+        "currency": currency,
+        "departments_count": len(all_10_depts),
+        "kpis_created": apply_res.get("count", 0),
+        "setup_completed": 1,
+    }
+
+
+def seed_default_kpis():
+    """Seed all standard departments, templates, and baseline KPIs into the database."""
+    frappe.set_user("Administrator")
+    consolidate_duplicate_departments()
+    all_10_depts = [
+        {"name": "Production", "code": "PRODUCTION", "weight": 1.5, "is_active": 1},
+        {"name": "Quality Control", "code": "QC", "weight": 1.3, "is_active": 1},
+        {"name": "Safety", "code": "SAFETY", "weight": 1.0, "is_active": 1},
+        {"name": "Procurement", "code": "PROCUREMENT", "weight": 1.0, "is_active": 1},
+        {"name": "Supply Chain", "code": "SUPPLY_CHAIN", "weight": 1.1, "is_active": 1},
+        {"name": "Sales", "code": "SALES", "weight": 1.2, "is_active": 1},
+        {"name": "R&D", "code": "RND", "weight": 1.0, "is_active": 1},
+        {"name": "Finance", "code": "FINANCE", "weight": 1.1, "is_active": 1},
+        {"name": "Human Resources", "code": "HR", "weight": 1.0, "is_active": 1},
+        {"name": "Customer Support & Success", "code": "CUSTOMER_SUCCESS", "weight": 1.1, "is_active": 1},
+    ]
+    setup_departments(all_10_depts)
+    create_default_templates()
+    return apply_all_default_templates()
 
     # 4. Complete Setup
     settings = frappe.get_doc("KPI Settings")

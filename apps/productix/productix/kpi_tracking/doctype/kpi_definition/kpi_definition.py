@@ -20,6 +20,11 @@ class KPIDefinition(Document):
         if self.target_value and self.minimum_acceptable:
             if self.direction == "Higher is Better" and self.minimum_acceptable > self.target_value:
                 frappe.throw("Minimum acceptable value cannot exceed target for 'Higher is Better' KPIs")
+        if self.direction == "Lower is Better":
+            if (self.warning_threshold == 80 and self.critical_threshold == 60) or not self.warning_threshold:
+                self.warning_threshold = 110.0
+                self.critical_threshold = 130.0
+
         if self.warning_threshold and self.critical_threshold:
             if self.direction == "Higher is Better" and self.warning_threshold <= self.critical_threshold:
                 frappe.throw("Warning threshold must be greater than critical threshold for 'Higher is Better' KPIs")

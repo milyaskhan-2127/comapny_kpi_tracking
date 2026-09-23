@@ -27,8 +27,6 @@ productix = {
             'kpi_setup_wizard',
             'kpi-ai-assistant',
             'kpi_ai_assistant',
-            'kpi-data-entry-page',
-            'kpi_data_entry_page',
             'backups',
             'kpi-definition',
             'kpi_definition',
@@ -117,14 +115,47 @@ productix = {
             const user = frappe.session.user;
             if (!user || user === 'Guest') return;
 
+            const user_roles = frappe.user_roles || (frappe.boot && frappe.boot.user && frappe.boot.user.roles) || [];
+            const has_role = function(r) {
+                if (Array.isArray(user_roles) && user_roles.includes(r)) return true;
+                if (frappe.user && typeof frappe.user.has_role === 'function') return frappe.user.has_role(r);
+                if (frappe.boot && frappe.boot.user && Array.isArray(frappe.boot.user.roles)) return frappe.boot.user.roles.includes(r);
+                return false;
+            };
+
             const is_admin = user === 'Administrator' ||
-                             frappe.user.has_role('System Manager') ||
-                             frappe.user.has_role('KPI Admin');
+                             has_role('System Manager') ||
+                             has_role('KPI Admin') ||
+                             has_role('Administrator') ||
+                             has_role('Productix Admin') ||
+                             has_role('Factory Admin') ||
+                             has_role('Assistant System Administrator');
 
             if (is_admin) return;
 
+            const is_ceo = has_role('KPI CEO');
             const route = frappe.get_route() || [];
             if (route.length === 0) return;
+
+            if (is_ceo) {
+                const CEO_FORBIDDEN = [
+                    'backups',
+                    'kpi-data-entry-page',
+                    'kpi_data_entry_page',
+                    'kpi-setup-wizard',
+                    'kpi_setup_wizard',
+                    'kpi-formula-builder',
+                    'kpi_formula_builder'
+                ];
+                for (let i = 0; i < route.length; i++) {
+                    const norm = normalize(route[i]);
+                    if (CEO_FORBIDDEN.includes(norm)) {
+                        redirectToDepartmentDashboard(__('Access restricted: Backup and Data Entry are reserved for administrators.'));
+                        return;
+                    }
+                }
+                return;
+            }
 
             for (let i = 0; i < route.length; i++) {
                 if (isForbidden(route[i])) {
@@ -140,20 +171,56 @@ productix = {
 
     filter_employee_kpi_navigation: function() {
         function sanitizeUI() {
-            const user = frappe.session.user;
+            const user = frappe.session && frappe.session.user;
             if (!user || user === 'Guest') return;
 
+            const user_roles = frappe.user_roles || (frappe.boot && frappe.boot.user && frappe.boot.user.roles) || [];
+            const has_role = function(r) {
+                if (Array.isArray(user_roles) && user_roles.includes(r)) return true;
+                if (frappe.user && typeof frappe.user.has_role === 'function') return frappe.user.has_role(r);
+                if (frappe.boot && frappe.boot.user && Array.isArray(frappe.boot.user.roles)) return frappe.boot.user.roles.includes(r);
+                return false;
+            };
+
             const is_admin = user === 'Administrator' ||
-                             frappe.user.has_role('System Manager') ||
-                             frappe.user.has_role('KPI Admin');
+                             has_role('System Manager') ||
+                             has_role('KPI Admin') ||
+                             has_role('Administrator') ||
+                             has_role('Productix Admin') ||
+                             has_role('Factory Admin') ||
+                             has_role('Assistant System Administrator');
 
             if (is_admin) return;
 
-            const allowedLabels = [
-                'department dashboard',
-                'kpi data entry',
-                'kpi alert'
-            ];
+            const is_ceo = has_role('KPI CEO');
+            // CEOs keep visibility of their permitted dashboards; employees get
+            // the minimal data-entry experience. Backups/Data Entry remain hidden for CEOs.
+            const allowedLabels = is_ceo
+                ? [
+                    'company overview',
+                    'department dashboard',
+                    'machine health',
+                    'machine health dashboard',
+                    'machine',
+                    'machine type',
+                    'machine reading',
+                    'machine health log',
+                    'kpi alert',
+                    'ai performance assistant',
+                    'ai assistant',
+                    'action center',
+                    'kpi reports',
+                    'performance & variance',
+                    'department performance',
+                    'trend & forecast',
+                    'alert & action',
+                    'data quality'
+                ]
+                : [
+                    'department dashboard',
+                    'kpi data entry',
+                    'kpi alert'
+                ];
 
             function isAllowed(text) {
                 if (!text) return false;
@@ -183,7 +250,7 @@ productix = {
             });
         }
 
-        $(document).on('page-change ajaxComplete DOMNodeInserted', function() {
+        $(document).on('page-change ajaxComplete', function() {
             sanitizeUI();
         });
         setInterval(sanitizeUI, 1000);
@@ -272,17 +339,6 @@ productix = {
         });
     },
 };
-
-$(document).ready(function() {
-    $('.productix-dashboard-wrapper').remove();
-    if (frappe && frappe.session && frappe.session.user !== 'Guest') {
-        productix.init();
-    }
-});
-
-$(document).on('page-change', function() {
-    $('.productix-dashboard-wrapper').remove();
-});
 
 $(document).ready(function() {
     $('.productix-dashboard-wrapper').remove();

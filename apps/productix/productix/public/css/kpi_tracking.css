@@ -199,3 +199,74 @@
         padding: 0 8px;
     }
 }
+
+/* ─────────────────────────────────────────────
+   Machine Health Dashboard (machine-health page)
+   ───────────────────────────────────────────── */
+.machine-card:hover {
+    border-color: #2563eb !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.12);
+}
+.machine-card.is-critical {
+    border-color: #ef4444 !important;
+    background: #fef2f2 !important;
+}
+.machine-card.is-warning {
+    border-color: #f59e0b !important;
+    background: #fffbeb !important;
+}
+.machine-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+.mh-summary-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 10px;
+    padding: 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    height: 100%;
+}
+.mh-summary-card .mh-summary-value {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.mh-dept-section .mh-dept-heading {
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.mh-info-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 10px;
+    padding: 12px;
+    height: 100%;
+}
+.mh-info-card .mh-info-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #64748b;
+    font-weight: 600;
+}
+.mh-info-card .mh-info-value {
+    font-size: 16px;
+    font-weight: 700;
+    margin-top: 2px;
+    word-break: break-word;
+}
+.mh-reading-row td {
+    font-size: 13px;
+}
+.productix-mh-wrap .btn-record-reading {
+    font-weight: 600;
+}

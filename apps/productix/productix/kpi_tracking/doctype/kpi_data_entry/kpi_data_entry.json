@@ -20,6 +20,7 @@
     {"fieldname": "target_value", "fieldtype": "Float", "label": "Target Value", "read_only": 1},
     {"fieldname": "column_break_v1", "fieldtype": "Column Break"},
     {"fieldname": "achievement_percentage", "fieldtype": "Percent", "label": "Achievement %", "read_only": 1},
+    {"fieldname": "normalized_score", "fieldtype": "Float", "label": "Normalized Score (0-100)", "read_only": 1},
     {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "\nOn Track\nWarning\nCritical\nMissing Data", "read_only": 1, "in_list_view": 1},
     {"fieldname": "section_inputs", "fieldtype": "Section Break", "label": "Input Values", "collapsible": 1},
     {"fieldname": "input_values", "fieldtype": "Table", "label": "Input Values", "options": "KPI Data Entry Value"},
@@ -30,6 +31,7 @@
   "permissions": [
     {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1},
     {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1},
+    {"role": "KPI CEO", "read": 1},
     {"role": "KPI Employee", "read": 1, "write": 1, "create": 1, "submit": 1},
     {"role": "KPI Manager", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 1},
     {"role": "KPI Contributor", "read": 1, "write": 1, "create": 1, "submit": 1}

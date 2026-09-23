@@ -7,7 +7,7 @@ app_publisher = "TechoHub"
 app_description = "Recipe & Production ERP — built on ERPNext"
 app_email = "support@techohub.net"
 app_license = "MIT"
-app_version = "1.0.0"
+app_version = "1.1.0"
 
 # -----------------------------------------------------------------
 # Apps (installed alongside this app)
@@ -23,7 +23,6 @@ app_include_css = [
 ]
 app_include_js = [
     "/assets/productix/js/productix.js",
-    "/assets/productix/js/backup_manager.js",
     "/assets/productix/js/custom_scripts/native_doctype_scripts.js",
 ]
 
@@ -68,6 +67,40 @@ doc_events = {
         "on_update": "productix.subscription_management.utils.tenant_utils.handle_user_save",
         "on_trash": "productix.subscription_management.utils.tenant_utils.handle_user_trash",
     },
+    # ------------------------------------------------------------------
+    # KPI Tracking — master registry cache invalidation.
+    # Any change to these records flows everywhere (Overview, Department
+    # dashboards, Machine Health, Users, CEO access, Alerts, Reports, AI,
+    # Backup) without a restart, because consumers read the registry cache.
+    # ------------------------------------------------------------------
+    "KPI Department": {
+        "after_insert": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_update": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_trash": "productix.kpi_tracking.services.registry.invalidate_cache",
+    },
+    "KPI Definition": {
+        "after_insert": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_update": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_trash": "productix.kpi_tracking.services.registry.invalidate_cache",
+    },
+    "Machine": {
+        "after_insert": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_update": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_trash": "productix.kpi_tracking.services.registry.invalidate_cache",
+    },
+    "Machine Type": {
+        "after_insert": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_update": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_trash": "productix.kpi_tracking.services.registry.invalidate_cache",
+    },
+    "KPI CEO Access": {
+        "after_insert": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_update": "productix.kpi_tracking.services.registry.invalidate_cache",
+        "on_trash": "productix.kpi_tracking.services.registry.invalidate_cache",
+    },
+    "KPI Settings": {
+        "on_update": "productix.kpi_tracking.services.registry.invalidate_cache",
+    },
 }
 
 # -----------------------------------------------------------------
@@ -85,6 +118,8 @@ ignore_links_on_delete = [
     "KPI Operational Data",
     "KPI Settings",
     "Activity Log",
+    "Machine Reading",
+    "Machine Health Log",
 ]
 
 # -----------------------------------------------------------------
@@ -95,6 +130,7 @@ scheduler_events = {
         "productix.alerts.tasks.run_daily_inventory_scan",
         "productix.alerts.tasks.mark_expired_batches",
         "productix.kpi_tracking.services.alert_engine.run_scheduled_alert_check",
+        "productix.kpi_tracking.services.machine_health.run_scheduled_health_check",
     ],
     "hourly": [
         "productix.kpi_tracking.tasks.run_scheduled_predictions",
@@ -121,6 +157,10 @@ has_permission = {
     "KPI Settings": "productix.kpi_tracking.security.permissions.kpi_has_permission",
     "KPI User Assignment": "productix.kpi_tracking.security.permissions.kpi_has_permission",
     "KPI Business Unit": "productix.kpi_tracking.security.permissions.kpi_has_permission",
+    "Machine": "productix.kpi_tracking.security.permissions.kpi_has_permission",
+    "Machine Type": "productix.kpi_tracking.security.permissions.kpi_has_permission",
+    "Machine Reading": "productix.kpi_tracking.security.permissions.kpi_has_permission",
+    "Machine Health Log": "productix.kpi_tracking.security.permissions.kpi_has_permission",
 }
 
 # -----------------------------------------------------------------
@@ -138,8 +178,12 @@ permission_query_conditions = {
     "KPI Operational Data": "productix.kpi_tracking.security.permissions.get_kpi_admin_doctype_query_conditions",
     "KPI Settings": "productix.kpi_tracking.security.permissions.get_kpi_admin_doctype_query_conditions",
     "KPI User Assignment": "productix.kpi_tracking.security.permissions.get_kpi_admin_doctype_query_conditions",
-    "KPI Department": "productix.kpi_tracking.security.permissions.get_kpi_admin_doctype_query_conditions",
+    "KPI Department": "productix.kpi_tracking.security.permissions.get_kpi_department_query_conditions",
     "KPI Business Unit": "productix.kpi_tracking.security.permissions.get_kpi_admin_doctype_query_conditions",
+    "Machine": "productix.kpi_tracking.security.permissions.get_machine_query_conditions",
+    "Machine Type": "productix.kpi_tracking.security.permissions.get_kpi_machine_type_query_conditions",
+    "Machine Reading": "productix.kpi_tracking.security.permissions.get_machine_reading_query_conditions",
+    "Machine Health Log": "productix.kpi_tracking.security.permissions.get_machine_reading_query_conditions",
 }
 
 # -----------------------------------------------------------------
@@ -162,6 +206,7 @@ fixtures = [
         "KPI Employee",
         "KPI Manager",
         "KPI Contributor",
+        "KPI CEO",
     ]]]},
     {
         "dt": "Custom Field",

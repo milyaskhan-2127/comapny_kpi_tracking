@@ -1,23 +1,16 @@
 import frappe
 import json
 from frappe.utils import today, getdate
+from productix.kpi_tracking.services.period_engine import (
+    get_current_period,
+    resolve_canonical_period,
+    get_submission_monitoring,
+    calculate_normalized_score,
+)
 
 
-def _get_period_for_frequency(freq, d=None):
-    d = getdate(d) if d else getdate(today())
-    if freq == "Daily":
-        return d.strftime("%Y-%m-%d")
-    elif freq == "Weekly":
-        iso = d.isocalendar()
-        return f"{iso[0]}-W{iso[1]:02d}"
-    elif freq == "Monthly":
-        return d.strftime("%Y-%m")
-    elif freq == "Quarterly":
-        q = (d.month - 1) // 3 + 1
-        return f"{d.year}-Q{q}"
-    elif freq == "Yearly":
-        return str(d.year)
-    return d.strftime("%Y-%m")
+def _get_period_for_frequency(freq, d=None, ref_period=None):
+    return resolve_canonical_period(freq, ref_period, d)
 
 
 @frappe.whitelist()
@@ -26,22 +19,19 @@ def get_pending_kpis(department=None, frequency=None, period=None):
     role = _check_kpi_access()
 
     user_depts = _get_user_departments()
-    if not user_depts:
+    if not user_depts and role != "KPI Admin":
         return []
 
     if department and department not in ("All", "ALL", "All Departments"):
-        if department not in user_depts:
+        if role != "KPI Admin" and department not in user_depts:
             frappe.throw(f"Access denied: You do not have permission for department '{department}'.", frappe.PermissionError)
         target_depts = [department]
     else:
         target_depts = user_depts if role == "KPI Admin" else ([user_depts[0]] if user_depts else [])
 
-    company_freq = frappe.db.get_single_value("KPI Settings", "default_frequency") or "Daily"
-    active_freq = frequency if (frequency and frequency != "All") else company_freq
-
     filters = {"is_active": 1, "department": ["in", target_depts]}
-    if active_freq and active_freq != "All":
-        filters["frequency"] = active_freq
+    if frequency and frequency != "All":
+        filters["frequency"] = frequency
 
     kpis = frappe.db.get_all(
         "KPI Definition",
@@ -56,8 +46,8 @@ def get_pending_kpis(department=None, frequency=None, period=None):
     results = []
 
     for kpi in kpis:
-        freq = kpi.frequency or active_freq or company_freq
-        target_period = period if period else _get_period_for_frequency(freq, d)
+        freq = kpi.frequency or "Monthly"
+        target_period = resolve_canonical_period(freq, period, d)
 
         # Check for existing submitted entry
         existing_entry = frappe.db.get_value(
@@ -107,10 +97,10 @@ def get_pending_kpis(department=None, frequency=None, period=None):
 def submit_kpi_data(kpi, department, actual_value, entry_date=None,
                     input_values=None, customer=None, period=None):
     from productix.kpi_tracking.api.dashboard import _check_kpi_access, _get_user_departments
-    _check_kpi_access()
+    role = _check_kpi_access()
     user_depts = _get_user_departments()
 
-    if department not in user_depts:
+    if role != "KPI Admin" and department not in user_depts:
         frappe.throw(f"Access denied: You are not authorized for department '{department}'.", frappe.PermissionError)
 
     kpi_doc = frappe.get_doc("KPI Definition", kpi)
@@ -118,7 +108,7 @@ def submit_kpi_data(kpi, department, actual_value, entry_date=None,
         frappe.throw(f"KPI '{kpi}' does not belong to department '{department}'.", frappe.PermissionError)
 
     d_val = getdate(entry_date) if entry_date else getdate(today())
-    target_period = period if period else _get_period_for_frequency(kpi_doc.frequency or "Monthly", d_val)
+    target_period = resolve_canonical_period(kpi_doc.frequency or "Monthly", period, d_val)
 
     # Check if entry exists for this KPI, dept, period
     existing_name = frappe.db.get_value(
@@ -170,7 +160,10 @@ def submit_kpi_data(kpi, department, actual_value, entry_date=None,
         for iv in input_values:
             doc.append("input_values", iv)
 
-    doc.save(ignore_permissions=True)
+    if doc.is_new():
+        doc.insert(ignore_permissions=True)
+    else:
+        doc.save(ignore_permissions=True)
     doc.submit()
 
     return {
@@ -277,106 +270,25 @@ def get_data_entry_logs(department=None, frequency=None, period=None, limit=50, 
     }
 
 
+def _get_data_entry_monitoring_internal(frequency=None, period=None, department=None, departments=None):
+    """Authoritative data entry submission monitoring using central Period Engine."""
+    return get_submission_monitoring(frequency=frequency, period=period, department=department, departments=departments)
+
+
 @frappe.whitelist()
 def get_data_entry_monitoring(frequency=None, period=None):
-    """Admin page overview of which departments have submitted data and which are missing."""
+    """Overview of which departments have submitted data and which are missing."""
     from productix.kpi_tracking.api.dashboard import _check_kpi_access
+    from productix.kpi_tracking.security.permissions import get_ceo_authorized_departments
     role = _check_kpi_access()
-    if role != "KPI Admin":
-        frappe.throw("Access denied: Admin monitoring is restricted to administrators.", frappe.PermissionError)
+    if role == "KPI Employee":
+        frappe.throw("Access denied: Monitoring is restricted to administrators and CEOs.", frappe.PermissionError)
 
-    company_freq = frappe.db.get_single_value("KPI Settings", "default_frequency") or "Daily"
-    active_freq = frequency if (frequency and frequency != "All") else company_freq
+    ceo_depts = None
+    if role == "KPI CEO":
+        ceo_depts = get_ceo_authorized_departments()
 
-    d = getdate(today())
-    target_period = period if period else _get_period_for_frequency(active_freq, d)
-
-    departments = frappe.db.get_all(
-        "KPI Department",
-        filters={"is_active": 1},
-        fields=["name", "department_name", "weight"],
-        order_by="department_name asc",
-    )
-
-    overview = []
-    total_required = 0
-    total_completed = 0
-    total_missing = 0
-
-    for dept in departments:
-        kpi_filters = {"department": dept.name, "is_active": 1}
-        if active_freq and active_freq != "All":
-            kpi_filters["frequency"] = active_freq
-
-        dept_kpis = frappe.db.get_all("KPI Definition", filters=kpi_filters, fields=["name", "kpi_name", "frequency"])
-        required_count = len(dept_kpis)
-
-        # Submitted entries for this department and period
-        submitted_entries = frappe.db.get_all(
-            "KPI Data Entry",
-            filters={"department": dept.name, "period": target_period, "docstatus": 1},
-            fields=["kpi", "entry_date", "entered_by", "creation", "actual_value", "status"],
-            order_by="creation desc",
-        )
-
-        completed_kpis = {e.kpi for e in submitted_entries}
-        completed_count = len(completed_kpis)
-        missing_count = max(0, required_count - completed_count)
-        completion_pct = round((completed_count / required_count * 100), 1) if required_count > 0 else 0
-
-        last_entry = submitted_entries[0] if submitted_entries else None
-        last_entry_date = last_entry.entry_date if last_entry else None
-        last_entered_by = last_entry.entered_by if last_entry else None
-        last_entered_by_name = None
-        if last_entered_by:
-            last_entered_by_name = frappe.db.get_value("User", last_entered_by, "full_name") or last_entered_by
-
-        # Find active employees assigned to this department
-        employees = frappe.db.get_all(
-            "KPI User Assignment",
-            filters={"department": dept.name, "is_active": 1},
-            fields=["user"],
-        )
-        employee_emails = [emp.user for emp in employees]
-        employee_names = []
-        if employee_emails:
-            for u in frappe.db.get_all("User", filters={"name": ["in", employee_emails]}, fields=["name", "full_name"]):
-                employee_names.append(u.full_name or u.name)
-
-        total_required += required_count
-        total_completed += completed_count
-        total_missing += missing_count
-
-        overview.append({
-            "department": dept.department_name,
-            "department_code": dept.name,
-            "required_entries": required_count,
-            "completed_entries": completed_count,
-            "missing_entries": missing_count,
-            "completion_percentage": completion_pct,
-            "last_entry_date": last_entry_date,
-            "last_entered_by": last_entered_by_name or ("None" if required_count > 0 and completed_count == 0 else "--"),
-            "assigned_employees": employee_names,
-            "assigned_count": len(employee_names),
-            "period": target_period,
-            "frequency": active_freq or "Daily",
-            "is_complete": missing_count == 0 and required_count > 0,
-        })
-
-    overall_pct = round((total_completed / total_required * 100), 1) if total_required > 0 else 0
-
-    return {
-        "departments": overview,
-        "summary": {
-            "total_departments": len(departments),
-            "total_required": total_required,
-            "total_completed": total_completed,
-            "total_missing": total_missing,
-            "overall_completion_percentage": overall_pct,
-            "period": target_period,
-            "frequency": active_freq or "Daily",
-        }
-    }
+    return _get_data_entry_monitoring_internal(frequency=frequency, period=period, departments=ceo_depts)
 
 
 @frappe.whitelist()

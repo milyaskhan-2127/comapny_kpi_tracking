@@ -21,6 +21,12 @@ def get_data():
                 },
                 {
                     "type": "page",
+                    "name": "machine-health",
+                    "label": _("Machine Health Dashboard"),
+                    "description": _("Fleet health grid and per-machine diagnostics"),
+                },
+                {
+                    "type": "page",
                     "name": "kpi-ai-assistant",
                     "label": _("AI Performance Assistant"),
                     "description": _("AI analysis and intelligent directives"),
@@ -59,6 +65,12 @@ def get_data():
                     "name": "KPI Prediction",
                     "label": _("KPI Predictions"),
                     "description": _("Machine learning & regression projections"),
+                },
+                {
+                    "type": "page",
+                    "name": "backups",
+                    "label": _("Backup & Restore Manager"),
+                    "description": _("Validate, preview and restore KPI backups"),
                 },
             ],
         },
@@ -123,6 +135,24 @@ def get_data():
                     "name": "KPI User Assignment",
                     "label": _("KPI User Assignments"),
                     "description": _("Department and role assignments for staff"),
+                },
+                {
+                    "type": "doctype",
+                    "name": "KPI CEO Access",
+                    "label": _("CEO Access Configuration"),
+                    "description": _("Department and KPI access for CEOs"),
+                },
+                {
+                    "type": "doctype",
+                    "name": "Machine",
+                    "label": _("Machines"),
+                    "description": _("Machines tracked for health monitoring"),
+                },
+                {
+                    "type": "doctype",
+                    "name": "Machine Type",
+                    "label": _("Machine Types"),
+                    "description": _("Machine categories with health parameters"),
                 },
                 {
                     "type": "doctype",

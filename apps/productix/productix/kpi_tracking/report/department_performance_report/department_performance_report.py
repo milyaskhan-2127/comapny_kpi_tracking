@@ -85,8 +85,8 @@ def get_data(filters):
             # Selected period
             eval_periods = [period_filter]
         elif dept_periods:
-            # Show all historical periods for comprehensive comparison
-            eval_periods = dept_periods
+            # Show latest historical periods for comparison
+            eval_periods = dept_periods[-6:]
         else:
             # No data recorded yet
             eval_periods = ["No Data"]

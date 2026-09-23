@@ -1,2 +1,3 @@
 # List of patches to run on migrate
 # Format: app.patches.patch_module.execute
+productix.migrations.productix.fix_kpi_department_records
