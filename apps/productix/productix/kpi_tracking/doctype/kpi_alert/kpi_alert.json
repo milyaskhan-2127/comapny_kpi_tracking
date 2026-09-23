@@ -7,7 +7,7 @@
   "naming_rule": "Expression (old style)",
   "autoname": "KPI-ALERT-.YYYY.-.MM.-.#####",
   "fields": [
-    {"fieldname": "alert_type", "fieldtype": "Select", "label": "Alert Type", "reqd": 1, "options": "Target Miss\nGrowth Decline\nNegative Trend\nPrediction Miss\nRepeated Decline\nAdmin Directive\nEmployee Escalation\nMissing Data Reminder", "in_list_view": 1},
+    {"fieldname": "alert_type", "fieldtype": "Select", "label": "Alert Type", "reqd": 1, "options": "Target Miss\nGrowth Decline\nNegative Trend\nPrediction Miss\nRepeated Decline\nAdmin Directive\nEmployee Escalation\nMissing Data Reminder\nMachine Health Critical\nMachine Maintenance Overdue\nMachine Data Stale", "in_list_view": 1},
     {"fieldname": "subject", "fieldtype": "Data", "label": "Subject", "in_list_view": 1},
     {"fieldname": "severity", "fieldtype": "Select", "label": "Severity", "reqd": 1, "options": "Info\nWarning\nCritical\nInformational", "default": "Info", "in_list_view": 1},
     {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Active\nAcknowledged\nResolved", "default": "Active", "in_list_view": 1},
@@ -32,6 +32,7 @@
   "permissions": [
     {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
     {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "KPI CEO", "read": 1, "write": 1},
     {"role": "KPI Manager", "read": 1, "write": 1},
     {"role": "KPI Employee", "read": 1, "write": 1},
     {"role": "KPI Contributor", "read": 1, "write": 1}

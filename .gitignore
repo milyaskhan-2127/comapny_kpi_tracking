@@ -4,7 +4,7 @@ redis-cache-data/
 redis-queue-data/
 sites/
 logs/
-backups/
+/backups/
 *.sql
 
 # Python

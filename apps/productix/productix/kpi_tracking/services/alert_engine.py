@@ -14,7 +14,7 @@ def evaluate_alerts(kpi_code, department, period):
     latest = frappe.db.get_value(
         "KPI Data Entry",
         {"kpi": kpi_code, "department": department, "docstatus": 1},
-        ["actual_value", "achievement_percentage", "status", "period"],
+        ["actual_value", "achievement_percentage", "normalized_score", "status", "period"],
         order_by="entry_date desc", as_dict=True,
     )
     if not latest:
@@ -35,7 +35,7 @@ def evaluate_alerts(kpi_code, department, period):
 def _check_target_miss(kpi, department, latest, settings):
     if not kpi.target_value:
         return
-    ach = float(latest.achievement_percentage or 0.0)
+    ach = float(latest.normalized_score) if latest.get("normalized_score") is not None else float(latest.achievement_percentage or 0.0)
     warn = float(kpi.warning_threshold or 80.0)
     crit = float(kpi.critical_threshold or 60.0)
 
@@ -70,13 +70,21 @@ def _check_growth_decline(kpi, department, settings):
     from productix.kpi_tracking.services.analytics import calculate_growth
 
     growth_data = calculate_growth(kpi.name, department)
-    if growth_data.get("growth_percentage") is None or growth_data["growth_percentage"] >= 0:
+    growth_pct = growth_data.get("growth_percentage")
+    if growth_pct is None:
         return
 
-    severity = "Critical" if growth_data["growth_percentage"] < -20 else "Warning"
+    # Direction-sensitive decline check
+    is_lower_better = (getattr(kpi, "direction", None) == "Lower is Better")
+    is_declining = (growth_pct > 0) if is_lower_better else (growth_pct < 0)
+    if not is_declining:
+        return
+
+    abs_growth = abs(growth_pct)
+    severity = "Critical" if abs_growth > 20 else "Warning"
     _create_alert(
         kpi.name, department, "Growth Decline", severity,
-        (f"{kpi.kpi_name} declined {abs(growth_data['growth_percentage'])}% "
+        (f"{kpi.kpi_name} performance degraded {abs_growth:.1f}% "
          f"from {growth_data['previous_period']} to {growth_data['current_period']}"),
         growth_data.get("current_period"), growth_data.get("current_value"),
         growth_data.get("previous_value"), settings,
@@ -108,19 +116,25 @@ def _check_repeated_decline(kpi, department, settings):
     entries = frappe.db.get_all(
         "KPI Data Entry",
         filters={"kpi": kpi.name, "department": department, "docstatus": 1},
-        fields=["actual_value", "period"],
+        fields=["actual_value", "achievement_percentage", "normalized_score", "period"],
         order_by="entry_date desc", limit_page_length=n + 1,
     )
     if len(entries) < n + 1:
         return
 
-    declining = all(entries[i].actual_value < entries[i + 1].actual_value for i in range(n))
+    # Check consecutive decline in normalized performance score (ordered newest to oldest)
+    scores = [
+        float(e.normalized_score) if e.get("normalized_score") is not None
+        else float(e.achievement_percentage or 0.0)
+        for e in entries
+    ]
+    declining = all(scores[i] < scores[i + 1] for i in range(n))
     if not declining:
         return
 
     _create_alert(
         kpi.name, department, "Repeated Decline", "Critical",
-        f"{kpi.kpi_name} has declined for {n} consecutive periods",
+        f"{kpi.kpi_name} performance score has declined for {n} consecutive periods",
         entries[0].period, entries[0].actual_value, entries[-1].actual_value, settings,
         subject=f"Repeated Decline: {kpi.kpi_name}"
     )
@@ -130,10 +144,17 @@ def _create_alert(kpi, department, alert_type, severity, message,
                    period, trigger_val, threshold_val, settings, subject=None):
     cooldown_hours = settings.alert_cooldown_hours or 24
 
-    existing = frappe.db.get_all("KPI Alert", filters={
-        "kpi": kpi, "department": department, "alert_type": alert_type,
+    alert_filters = {
+        "department": department,
+        "alert_type": alert_type,
         "status": ["in", ["Active", "Acknowledged"]],
-    }, fields=["name", "cooldown_until"])
+    }
+    if kpi:
+        alert_filters["kpi"] = kpi
+    if subject:
+        alert_filters["subject"] = subject
+
+    existing = frappe.db.get_all("KPI Alert", filters=alert_filters, fields=["name", "cooldown_until"])
 
     for e in existing:
         if e.cooldown_until and now_datetime() < e.cooldown_until:
@@ -514,21 +535,87 @@ def acknowledge_alert(alert_name):
 @frappe.whitelist()
 def resolve_alert(alert_name):
     """Mark an alert as Resolved."""
-    from productix.kpi_tracking.api.dashboard import _check_kpi_access
+    from productix.kpi_tracking.api.dashboard import _check_kpi_access, _get_user_departments
     role = _check_kpi_access()
-    if role != "KPI Admin":
-        frappe.throw("Access denied: Only administrators can resolve alerts.", frappe.PermissionError)
+    user_depts = _get_user_departments()
 
     if not frappe.db.exists("KPI Alert", alert_name):
         frappe.throw(f"Alert {alert_name} does not exist.", frappe.DoesNotExistError)
 
     doc = frappe.get_doc("KPI Alert", alert_name)
+    if role != "KPI Admin":
+        if doc.department and doc.department not in user_depts:
+            frappe.throw("Access denied: You can only resolve alerts for your assigned department.", frappe.PermissionError)
+
     doc.status = "Resolved"
     doc.resolved_at = now_datetime()
     doc.resolved_by = frappe.session.user
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return {"status": "ok", "message": f"Alert {alert_name} resolved."}
+
+
+@frappe.whitelist()
+def resolve_all_alerts(department=None):
+    """Mark all active / acknowledged alerts as Resolved."""
+    from productix.kpi_tracking.api.dashboard import _check_kpi_access, _get_user_departments
+    role = _check_kpi_access()
+    user_depts = _get_user_departments()
+
+    filters = {"status": ["in", ["Active", "Acknowledged"]]}
+    if role != "KPI Admin":
+        if department and department in user_depts:
+            filters["department"] = department
+        elif user_depts:
+            filters["department"] = ["in", user_depts]
+        else:
+            return {"status": "ok", "count": 0, "message": "No alerts found to resolve."}
+    else:
+        if department and department != "All":
+            filters["department"] = department
+
+    alerts = frappe.db.get_all("KPI Alert", filters=filters, fields=["name"])
+    now_dt = now_datetime()
+    user = frappe.session.user
+
+    for a in alerts:
+        frappe.db.set_value("KPI Alert", a.name, {
+            "status": "Resolved",
+            "resolved_at": now_dt,
+            "resolved_by": user,
+        }, update_modified=True)
+
+    frappe.db.commit()
+    return {"status": "ok", "count": len(alerts), "message": f"{len(alerts)} alert(s) resolved successfully."}
+
+
+@frappe.whitelist()
+def acknowledge_all_alerts(department=None):
+    """Mark all active alerts as Acknowledged."""
+    from productix.kpi_tracking.api.dashboard import _check_kpi_access, _get_user_departments
+    role = _check_kpi_access()
+    user_depts = _get_user_departments()
+
+    filters = {"status": "Active"}
+    if role != "KPI Admin":
+        if department and department in user_depts:
+            filters["department"] = department
+        elif user_depts:
+            filters["department"] = ["in", user_depts]
+        else:
+            return {"status": "ok", "count": 0, "message": "No active alerts found."}
+    else:
+        if department and department != "All":
+            filters["department"] = department
+
+    alerts = frappe.db.get_all("KPI Alert", filters=filters, fields=["name"])
+    for a in alerts:
+        frappe.db.set_value("KPI Alert", a.name, {
+            "status": "Acknowledged"
+        }, update_modified=True)
+
+    frappe.db.commit()
+    return {"status": "ok", "count": len(alerts), "message": f"{len(alerts)} alert(s) acknowledged."}
 
 
 def run_scheduled_alert_check():

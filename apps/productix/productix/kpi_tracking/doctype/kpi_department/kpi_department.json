@@ -6,10 +6,11 @@
   "engine": "InnoDB",
   "naming_rule": "By fieldname",
   "autoname": "field:department_code",
-  "field_order": ["department_name", "department_code", "column_break_1", "is_active", "weight", "section_break_2", "description"],
+  "field_order": ["department_name", "department_code", "location", "column_break_1", "is_active", "weight", "section_break_2", "description"],
   "fields": [
     {"fieldname": "department_name", "fieldtype": "Data", "label": "Department Name", "reqd": 1, "in_list_view": 1},
     {"fieldname": "department_code", "fieldtype": "Data", "label": "Department Code", "reqd": 1, "unique": 1, "in_list_view": 1},
+    {"fieldname": "location", "fieldtype": "Data", "label": "Location / Block", "in_list_view": 1},
     {"fieldname": "column_break_1", "fieldtype": "Column Break"},
     {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1", "in_list_view": 1},
     {"fieldname": "weight", "fieldtype": "Float", "label": "Weight", "default": "1.0", "description": "Department weight for company-level aggregation"},
@@ -18,11 +19,13 @@
   ],
   "permissions": [
     {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
-    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1}
+    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "KPI CEO", "read": 1},
+    {"role": "KPI Employee", "read": 1}
   ],
   "sort_field": "department_name",
   "sort_order": "ASC",
   "title_field": "department_name",
-  "search_fields": "department_name, department_code",
+  "search_fields": "department_name, department_code, location",
   "track_changes": 1
 }

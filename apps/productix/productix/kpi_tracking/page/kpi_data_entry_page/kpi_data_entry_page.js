@@ -54,6 +54,7 @@ function setup_data_entry_actions(page) {
         page.add_menu_item("📊 Department Dashboard", () => frappe.set_route("kpi-department-dashboard", { department: page._selected_dept === 'All' ? '' : page._selected_dept }));
         page.add_menu_item("🤖 AI Assistant", () => frappe.set_route("kpi-ai-assistant"));
         page.add_menu_item("🚨 Action & Alert Center", () => frappe.set_route("kpi-action-center"));
+        page.add_menu_item("💾 Backup & Restore Manager", () => frappe.set_route("backups"));
     } else {
         page.set_primary_action("📊 Department Dashboard", () => frappe.set_route("kpi-department-dashboard"), "fa fa-chart-line");
         page.set_secondary_action("🔄 Refresh", () => load_pending(page), "fa fa-sync");
@@ -100,22 +101,23 @@ function render_entry(page, kpis, dept) {
     const isAdmin = page._ctx && page._ctx.is_admin;
 
     let deptControlHtml = '';
-    if (isAdmin) {
+    if (isAdmin || (page._ctx && page._ctx.is_ceo)) {
         deptControlHtml = `
             <div style="display:flex;align-items:center;gap:10px;min-width:280px;">
                 <label style="margin:0;font-size:13px;font-weight:700;color:#475569;">Department:</label>
-                <select id="data-entry-dept-select" class="form-control form-control-sm" style="font-weight:600;max-width:240px;">
+                <select id="data-entry-dept-select" class="form-control form-control-sm" style="font-weight:600;max-width:260px;">
                     <option value="All" ${dept === 'All' ? 'selected' : ''}>🏢 All Departments</option>
-                    ${depts.map(d => `<option value="${d.name}" ${d.name === dept ? 'selected' : ''}>${d.department_name || d.name}</option>`).join('')}
+                    ${depts.map(d => `<option value="${d.name}" ${d.name === dept ? 'selected' : ''}>${frappe.utils.escape_html(d.display_name || d.department_name || d.name)}</option>`).join('')}
                 </select>
             </div>
         `;
     } else {
-        const curDeptName = (depts.find(d => d.name === dept) || {}).department_name || dept;
+        const curDeptObj = depts.find(d => d.name === dept);
+        const curDeptName = (curDeptObj && curDeptObj.display_name) || (curDeptObj && curDeptObj.department_name) || dept;
         deptControlHtml = `
             <div style="display:flex;align-items:center;gap:8px;">
                 <span style="font-size:12px;font-weight:700;color:#475569;">Assigned Department:</span>
-                <span class="badge badge-primary" style="font-size:13px;padding:5px 12px;background:#2563eb;">${curDeptName}</span>
+                <span class="badge badge-primary" style="font-size:13px;padding:5px 12px;background:#2563eb;">${frappe.utils.escape_html(curDeptName)}</span>
             </div>
         `;
     }
@@ -175,7 +177,7 @@ function render_entry(page, kpis, dept) {
                             </div>
                             <div class="col-md-3 mb-2">
                                 <label style="font-size:12px;font-weight:600;color:transparent;">Action</label>
-                                <button class="btn btn-primary btn-block kpi-submit-btn" data-idx="${idx}" style="font-weight:600;">
+                                <button class="btn btn-primary btn-block kpi-submit-btn" data-idx="${idx}" data-kpi="${kpi.kpi}" data-dept="${kpi.department}" data-period="${kpi.period}" style="font-weight:600;">
                                     Submit
                                 </button>
                             </div>
@@ -301,8 +303,9 @@ function render_entry(page, kpis, dept) {
             return;
         }
 
-        const kpi = actual_input.data("kpi");
-        const department = actual_input.data("dept");
+        const kpi = btn.data("kpi") || actual_input.data("kpi");
+        const department = btn.data("dept") || actual_input.data("dept");
+        const period = btn.data("period");
 
         const input_values = [];
         container.find(".kpi-input-field").each(function () {
@@ -320,6 +323,7 @@ function render_entry(page, kpis, dept) {
 
         frappe.xcall("productix.kpi_tracking.api.data_entry.submit_kpi_data", {
             kpi, department, actual_value,
+            period: period || null,
             input_values: input_values.length > 0 ? input_values : null,
         }).then((r) => {
             frappe.show_alert({ message: `✅ Submitted: ${r.status} (${Math.round(r.achievement)}%)`, indicator: r.status === "On Track" ? "green" : "orange" });

@@ -1,6 +1,14 @@
 import frappe
 from frappe.utils import getdate, add_days, add_months, today
 import math
+from productix.kpi_tracking.services.period_engine import (
+    get_current_period,
+    resolve_canonical_period,
+    get_next_period,
+    get_previous_period,
+    calculate_normalized_score,
+    get_status_from_score,
+)
 
 
 def run_post_entry_analytics(kpi_data_entry):
@@ -103,6 +111,17 @@ def calculate_growth(kpi_code, department=None):
     previous = float(entries[1].actual_value or 0.0)
 
     growth_res = compute_growth(current, previous)
+
+    # Check direction for status interpretation
+    try:
+        kpi_doc = frappe.get_cached_doc("KPI Definition", kpi_code)
+        if kpi_doc and kpi_doc.direction == "Lower is Better":
+            raw_growth = growth_res.get("growth_percentage")
+            if raw_growth is not None:
+                growth_res["status"] = "Improving" if raw_growth < 0 else ("Decline" if raw_growth > 0 else "Stable")
+    except Exception:
+        pass
+
     growth_res.update({
         "current_value": current,
         "previous_value": previous,
@@ -310,24 +329,11 @@ def generate_prediction(kpi_code, department=None):
     if all(v >= 0 for v in values) and float(kpi_doc.target_value or 0) >= 0:
         predicted_value = max(0.0, predicted_value)
 
-    last_date = getdate(entries[-1].entry_date)
-    if kpi_doc.frequency == "Daily":
-        next_date = add_days(last_date, 1)
-        target_period = next_date.strftime("%Y-%m-%d")
-    elif kpi_doc.frequency == "Weekly":
-        next_date = add_days(last_date, 7)
-        iso = next_date.isocalendar()
-        target_period = f"{iso[0]}-W{iso[1]:02d}"
-    elif kpi_doc.frequency == "Monthly":
-        next_date = add_months(last_date, 1)
-        target_period = next_date.strftime("%Y-%m")
-    elif kpi_doc.frequency == "Quarterly":
-        next_date = add_months(last_date, 3)
-        q = (next_date.month - 1) // 3 + 1
-        target_period = f"{next_date.year}-Q{q}"
+    last_period = entries[-1].period if entries else None
+    if last_period:
+        target_period = get_next_period(kpi_doc.frequency or "Daily", last_period)
     else:
-        next_date = add_months(last_date, 12)
-        target_period = str(next_date.year)
+        target_period = get_next_period(kpi_doc.frequency or "Daily", get_current_period(kpi_doc.frequency or "Daily"))
 
     existing = frappe.db.exists("KPI Prediction", {
         "kpi": kpi_code, "department": department or "",
@@ -370,7 +376,7 @@ def update_prediction_actual(kpi_code, department, period, actual_value):
         pred_doc.update_actual(actual_value)
 
 
-def get_department_performance(department, timeframe="6_months", horizon="next_month", period=None, frequency=None):
+def get_department_performance(department, timeframe="6_months", horizon="next_month", period=None, frequency=None, include_predictions=False):
     period_limit = 6 if timeframe == "6_months" else (12 if timeframe == "overall" else (1 if timeframe in ("today", "recent") else 3))
 
     filters = {"department": department, "is_active": 1}
@@ -396,21 +402,31 @@ def get_department_performance(department, timeframe="6_months", horizon="next_m
     weighted_score = 0.0
     on_track = warning = critical = missing = 0
     kpi_details = []
+    d_today = getdate(today())
 
     for kpi in kpis:
-        entry_filters = {"kpi": kpi.name, "docstatus": 1}
-        if period:
-            entry_filters["period"] = period
+        freq = kpi.frequency or "Monthly"
+        target_period = resolve_canonical_period(freq, period, d_today)
+        entry_filters = {
+            "kpi": kpi.name,
+            "department": department,
+            "period": target_period,
+            "docstatus": 1
+        }
 
         latest = frappe.db.get_value(
             "KPI Data Entry",
             entry_filters,
-            ["actual_value", "achievement_percentage", "status", "period", "entry_date"],
-            order_by="entry_date desc", as_dict=True,
+            ["actual_value", "achievement_percentage", "normalized_score", "status", "period", "entry_date"],
+            order_by="creation desc", as_dict=True,
         )
 
-        multi_preds = generate_multi_horizon_predictions(kpi.name, department)
-        chosen_pred = multi_preds.get(horizon) or multi_preds.get("next_month") if multi_preds.get("available") else None
+        if include_predictions:
+            multi_preds = generate_multi_horizon_predictions(kpi.name, department)
+            chosen_pred = multi_preds.get(horizon) or multi_preds.get("next_month") if multi_preds.get("available") else None
+        else:
+            multi_preds = {"available": False}
+            chosen_pred = None
 
         if not latest:
             missing += 1
@@ -422,11 +438,12 @@ def get_department_performance(department, timeframe="6_months", horizon="next_m
                 "target": kpi.target_value,
                 "unit": kpi.unit or "",
                 "weight": float(kpi.weight or 1.0),
-                "frequency": kpi.frequency or "Monthly",
+                "frequency": freq,
                 "achievement": None,
+                "normalized_score": None,
                 "trend": "Stable",
                 "growth": None,
-                "period": period or "Pending Entry",
+                "period": target_period,
                 "prediction": chosen_pred,
                 "predictions_all": multi_preds,
             })
@@ -434,8 +451,9 @@ def get_department_performance(department, timeframe="6_months", horizon="next_m
 
         weight = float(kpi.weight or 1.0)
         total_weight += weight
-        ach = max(0.0, min(100.0, float(latest.achievement_percentage or 0.0)))
-        weighted_score += ach * weight
+        norm_sc = float(latest.normalized_score) if latest.get("normalized_score") is not None else max(0.0, min(100.0, float(latest.achievement_percentage or 0.0)))
+        ach = float(latest.achievement_percentage) if latest.get("achievement_percentage") is not None else None
+        weighted_score += norm_sc * weight
 
         status_val = latest.status or "Pending / No Data"
         if status_val == "On Track":
@@ -454,9 +472,11 @@ def get_department_performance(department, timeframe="6_months", horizon="next_m
             "kpi": kpi.kpi_name, "kpi_code": kpi.name,
             "actual": latest.actual_value, "target": kpi.target_value,
             "unit": kpi.unit or "",
-            "achievement": ach, "status": status_val,
-            "period": latest.period, "weight": weight,
-            "frequency": kpi.frequency or "Monthly",
+            "achievement": ach,
+            "normalized_score": norm_sc,
+            "status": status_val,
+            "period": latest.period or target_period, "weight": weight,
+            "frequency": freq,
             "trend": trend_data.get("trend"),
             "growth": growth_data.get("growth_percentage"),
             "prediction": chosen_pred,
@@ -514,10 +534,10 @@ def get_department_performance(department, timeframe="6_months", horizon="next_m
         dept_trend = "Improving" if sc_slope > 0.5 else ("Declining" if sc_slope < -0.5 else "Stable")
         dept_predictions = {
             "available": True,
-            "tomorrow": {"predicted_score": round(max(0.0, min(100.0, sc_cur + (sc_slope / 30.0))), 1), "confidence": conf_sc, "horizon": "Tomorrow"},
-            "next_week": {"predicted_score": round(max(0.0, min(100.0, sc_cur + (sc_slope / 4.0))), 1), "confidence": max(65.0, round(conf_sc - 1.0, 1)), "horizon": "Next Week"},
-            "next_month": {"predicted_score": round(max(0.0, min(100.0, sc_cur + sc_slope)), 1), "confidence": max(60.0, round(conf_sc - 2.0, 1)), "horizon": "Next Month"},
-            "next_quarter": {"predicted_score": round(max(0.0, min(100.0, sc_cur + (sc_slope * 3.0))), 1), "confidence": max(55.0, round(conf_sc - 4.0, 1)), "horizon": "Next Quarter"},
+            "tomorrow": {"predicted_score": round(max(0.0, min(100.0, sc_cur + (sc_slope / 30.0))), 1), "confidence": conf_sc, "horizon": "Tomorrow", "target_period": "Tomorrow"},
+            "next_week": {"predicted_score": round(max(0.0, min(100.0, sc_cur + (sc_slope / 4.0))), 1), "confidence": max(65.0, round(conf_sc - 1.0, 1)), "horizon": "Next Week", "target_period": "Next Week"},
+            "next_month": {"predicted_score": round(max(0.0, min(100.0, sc_cur + sc_slope)), 1), "confidence": max(60.0, round(conf_sc - 2.0, 1)), "horizon": "Next Month", "target_period": "Next Month"},
+            "next_quarter": {"predicted_score": round(max(0.0, min(100.0, sc_cur + (sc_slope * 3.0))), 1), "confidence": max(55.0, round(conf_sc - 4.0, 1)), "horizon": "Next Quarter", "target_period": "Next Quarter"},
         }
 
     return {
@@ -533,12 +553,16 @@ def get_department_performance(department, timeframe="6_months", horizon="next_m
     }
 
 
-def get_company_performance(timeframe="6_months", horizon="next_month", period=None, frequency=None):
+def get_company_performance(timeframe="6_months", horizon="next_month", period=None, frequency=None, departments=None):
     period_limit = 6 if timeframe == "6_months" else (12 if timeframe == "overall" else (1 if timeframe in ("today", "recent") else 3))
 
-    departments = frappe.db.get_all(
-        "KPI Department", filters={"is_active": 1},
-        fields=["name", "department_name", "weight"],
+    dept_filters = {"is_active": 1}
+    if departments:
+        dept_filters["name"] = ["in", departments]
+
+    dept_docs = frappe.db.get_all(
+        "KPI Department", filters=dept_filters,
+        fields=["name", "department_name", "department_code", "weight", "location"],
         order_by="department_name asc"
     )
 
@@ -552,14 +576,18 @@ def get_company_performance(timeframe="6_months", horizon="next_month", period=N
     for p in distinct_periods:
         weighted_sum = 0.0
         total_w = 0.0
-        for dept in departments:
+        for dept in dept_docs:
             entries = frappe.db.get_all(
                 "KPI Data Entry",
                 filters={"department": dept.name, "period": p, "docstatus": 1},
-                fields=["achievement_percentage"]
+                fields=["achievement_percentage", "normalized_score"]
             )
             if entries:
-                avg_ach = sum(max(0.0, min(100.0, float(e.achievement_percentage or 0.0))) for e in entries) / len(entries)
+                avg_ach = sum(
+                    float(e.normalized_score) if e.get("normalized_score") is not None
+                    else max(0.0, min(100.0, float(e.achievement_percentage or 0.0)))
+                    for e in entries
+                ) / len(entries)
                 w = float(dept.weight or 1.0)
                 weighted_sum += avg_ach * w
                 total_w += w
@@ -602,17 +630,17 @@ def get_company_performance(timeframe="6_months", horizon="next_month", period=N
         cur_sc = scores[-1]
         company_predictions = {
             "available": True,
-            "tomorrow": {"predicted_score": round(max(0.0, min(100.0, cur_sc + (slope / 30.0))), 1), "confidence": conf, "horizon": "Tomorrow"},
-            "next_week": {"predicted_score": round(max(0.0, min(100.0, cur_sc + (slope / 4.0))), 1), "confidence": max(65.0, round(conf - 1.0, 1)), "horizon": "Next Week"},
-            "next_month": {"predicted_score": round(max(0.0, min(100.0, cur_sc + slope)), 1), "confidence": max(60.0, round(conf - 2.0, 1)), "horizon": "Next Month"},
-            "next_quarter": {"predicted_score": round(max(0.0, min(100.0, cur_sc + (slope * 3.0))), 1), "confidence": max(55.0, round(conf - 4.0, 1)), "horizon": "Next Quarter"},
+            "tomorrow": {"predicted_score": round(max(0.0, min(100.0, cur_sc + (slope / 30.0))), 1), "confidence": conf, "horizon": "Tomorrow", "target_period": "Tomorrow"},
+            "next_week": {"predicted_score": round(max(0.0, min(100.0, cur_sc + (slope / 4.0))), 1), "confidence": max(65.0, round(conf - 1.0, 1)), "horizon": "Next Week", "target_period": "Next Week"},
+            "next_month": {"predicted_score": round(max(0.0, min(100.0, cur_sc + slope)), 1), "confidence": max(60.0, round(conf - 2.0, 1)), "horizon": "Next Month", "target_period": "Next Month"},
+            "next_quarter": {"predicted_score": round(max(0.0, min(100.0, cur_sc + (slope * 3.0))), 1), "confidence": max(55.0, round(conf - 4.0, 1)), "horizon": "Next Quarter", "target_period": "Next Quarter"},
         }
 
     total_weight = 0.0
     weighted_score = 0.0
     dept_details = []
 
-    for dept in departments:
+    for dept in dept_docs:
         perf = get_department_performance(
             dept.name, timeframe=timeframe, horizon=horizon,
             period=period, frequency=frequency
@@ -622,8 +650,18 @@ def get_company_performance(timeframe="6_months", horizon="next_month", period=N
             total_weight += weight
             weighted_score += perf["score"] * weight
 
+        label = dept.department_name or dept.name
+        if dept.get("location"):
+            label += f" — {dept.location}"
+        code = dept.get("department_code") or dept.name
+        if code and code != label:
+            label += f" [{code}]"
+
         dept_details.append({
-            "department": dept.department_name, "department_code": dept.name,
+            "department": label,
+            "department_raw_name": dept.department_name,
+            "department_code": dept.name,
+            "location": dept.get("location") or "",
             "score": perf["score"], "weight": weight,
             "on_track": perf["on_track"], "warning": perf["warning"],
             "critical": perf["critical"], "missing": perf["missing"],
@@ -635,7 +673,7 @@ def get_company_performance(timeframe="6_months", horizon="next_month", period=N
     return {
         "score": company_score,
         "departments": dept_details,
-        "total_departments": len(departments),
+        "total_departments": len(dept_docs),
         "history": company_history,
         "growth": company_growth,
         "trend": company_trend,

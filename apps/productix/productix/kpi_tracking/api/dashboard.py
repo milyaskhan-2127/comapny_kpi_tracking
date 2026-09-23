@@ -1,7 +1,11 @@
 import frappe
 from productix.kpi_tracking.security.permissions import (
     is_kpi_admin,
+    is_kpi_ceo,
     get_user_authorized_department,
+    get_ceo_authorized_departments,
+    get_ceo_access,
+    get_user_role,
 )
 
 
@@ -16,16 +20,17 @@ def _check_kpi_access(user=None):
     if is_kpi_admin(user):
         return "KPI Admin"
 
+    if is_kpi_ceo(user):
+        return "KPI CEO"
+
     roles = frappe.get_roles(user)
     if "KPI Employee" in roles or "KPI Manager" in roles or "KPI Contributor" in roles:
         return "KPI Employee"
 
-    # Check if assignment exists
     has_active = frappe.db.exists("KPI User Assignment", {"user": user, "is_active": 1})
     if has_active:
         return "KPI Employee"
 
-    # Check if employee record exists with department
     dept = get_user_authorized_department(user)
     if dept:
         return "KPI Employee"
@@ -36,12 +41,32 @@ def _check_kpi_access(user=None):
 def _get_user_departments(user=None):
     user = user or frappe.session.user
     role = _check_kpi_access(user)
+
     if role == "KPI Admin":
-        return frappe.db.get_all("KPI Department", filters={"is_active": 1}, pluck="name")
+        return frappe.db.get_all(
+            "KPI Department",
+            filters={"is_active": 1},
+            pluck="name",
+            order_by="department_name asc",
+        )
+
+    if role == "KPI CEO":
+        depts = get_ceo_authorized_departments(user)
+        if depts:
+            return frappe.db.get_all(
+                "KPI Department",
+                filters={"name": ["in", depts], "is_active": 1},
+                pluck="name",
+                order_by="department_name asc",
+            )
+        return frappe.db.get_all(
+            "KPI Department",
+            filters={"is_active": 1},
+            pluck="name",
+            order_by="department_name asc",
+        )
 
     departments = set()
-
-    # 1. From User Assignment
     assigned_depts = frappe.db.get_all(
         "KPI User Assignment",
         filters={"user": user, "is_active": 1},
@@ -51,46 +76,101 @@ def _get_user_departments(user=None):
         if d:
             departments.add(d)
 
-    # 2. From Employee record
     emp_dept = get_user_authorized_department(user)
     if emp_dept:
         departments.add(emp_dept)
 
-    if departments:
-        active_depts = frappe.db.get_all(
-            "KPI Department",
-            filters={"name": ["in", list(departments)], "is_active": 1},
-            pluck="name"
-        )
-        return active_depts
+    if not departments:
+        return []
 
-    return []
+    return frappe.db.get_all(
+        "KPI Department",
+        filters={"name": ["in", list(departments)], "is_active": 1},
+        pluck="name",
+        order_by="department_name asc",
+    )
 
 
 @frappe.whitelist()
 def get_company_overview(timeframe="6_months", horizon="next_month", period=None, frequency=None):
     role = _check_kpi_access()
-    if role != "KPI Admin":
+
+    if role == "KPI CEO":
+        ceo = get_ceo_access()
+        if not ceo or not ceo.can_view_company_overview:
+            frappe.throw("Access denied: You do not have permission to view Company Overview.", frappe.PermissionError)
+    elif role != "KPI Admin":
         frappe.throw("Access denied: Company Performance Overview is restricted to administrators.", frappe.PermissionError)
 
     if not frequency or frequency == "All":
         frequency = frappe.db.get_single_value("KPI Settings", "default_frequency") or "Daily"
 
     from productix.kpi_tracking.services.analytics import get_company_performance
-    perf = get_company_performance(timeframe=timeframe, horizon=horizon, period=period, frequency=frequency)
 
-    alerts = frappe.db.get_all(
-        "KPI Alert",
-        filters={"status": ["in", ["Active", "Acknowledged"]]},
-        fields=["severity", "count(name) as cnt"],
-        group_by="severity",
+    ceo_depts = None
+    if role == "KPI CEO":
+        ceo_depts = get_ceo_authorized_departments()
+
+    perf = get_company_performance(
+        timeframe=timeframe, horizon=horizon, period=period,
+        frequency=frequency, departments=ceo_depts
     )
-    perf["alerts_summary"] = {a.severity: a.cnt for a in alerts}
-    perf["total_kpis"] = frappe.db.count("KPI Definition", {"is_active": 1})
+
+    crit_filter = {"status": "Active", "severity": "Critical"}
+    warn_filter = {"status": "Active", "severity": "Warning"}
+    info_filter = {"status": "Active", "severity": ["in", ["Info", "Informational"]]}
+    ack_filter = {"status": "Acknowledged"}
+    res_filter = {"status": "Resolved"}
+    if ceo_depts:
+        crit_filter["department"] = ["in", ceo_depts]
+        warn_filter["department"] = ["in", ceo_depts]
+        info_filter["department"] = ["in", ceo_depts]
+        ack_filter["department"] = ["in", ceo_depts]
+        res_filter["department"] = ["in", ceo_depts]
+
+    critical_count = frappe.db.count("KPI Alert", crit_filter)
+    warning_count = frappe.db.count("KPI Alert", warn_filter)
+    info_count = frappe.db.count("KPI Alert", info_filter)
+    ack_count = frappe.db.count("KPI Alert", ack_filter)
+    res_count = frappe.db.count("KPI Alert", res_filter)
+
+    perf["critical_alerts_count"] = critical_count
+    perf["warning_alerts_count"] = warning_count
+    perf["info_alerts_count"] = info_count
+    perf["active_alerts_count"] = critical_count + warning_count + info_count
+    perf["acknowledged_alerts_count"] = ack_count
+    perf["resolved_alerts_count"] = res_count
+    perf["alerts_summary"] = {
+        "Critical": critical_count,
+        "Warning": warning_count,
+        "Info": info_count,
+    }
+
+    kpi_filters = {"is_active": 1}
+    if ceo_depts:
+        kpi_filters["department"] = ["in", ceo_depts]
+    perf["total_kpis"] = frappe.db.count("KPI Definition", kpi_filters)
     perf["total_users"] = frappe.db.count("KPI User Assignment", {"is_active": 1})
 
-    from productix.kpi_tracking.api.data_entry import get_data_entry_monitoring
-    perf["data_entry_monitoring"] = get_data_entry_monitoring(frequency=frequency, period=period)
+    from productix.kpi_tracking.api.data_entry import _get_data_entry_monitoring_internal
+    perf["data_entry_monitoring"] = _get_data_entry_monitoring_internal(
+        frequency=frequency, period=period, departments=ceo_depts
+    )
+
+    can_view_machines = True
+    if role == "KPI CEO":
+        ceo = get_ceo_access()
+        can_view_machines = bool(ceo and getattr(ceo, "can_view_machines", 0))
+
+    if can_view_machines:
+        try:
+            from productix.kpi_tracking.services.machine_health import get_company_machines_health
+            perf["machine_health_overview"] = get_company_machines_health(departments=ceo_depts)
+        except Exception as e:
+            frappe.log_error(f"Error getting company machine health: {e}")
+            perf["machine_health_overview"] = None
+    else:
+        perf["machine_health_overview"] = None
 
     return perf
 
@@ -100,18 +180,37 @@ def get_department_dashboard(department=None, timeframe="6_months", horizon="nex
     role = _check_kpi_access()
     user_depts = _get_user_departments()
 
-    if not user_depts:
+    if not user_depts and role not in ("KPI Admin", "KPI CEO"):
         frappe.throw("No active department found or assigned to your account.", frappe.PermissionError)
 
-    # For non-admin employees, strictly enforce their authorized department
-    if role != "KPI Admin":
-        if not department or department not in user_depts:
+    if role == "KPI Employee":
+        if department and department not in user_depts:
+            frappe.throw("Access denied: You can only view your assigned department.", frappe.PermissionError)
+        department = user_depts[0] if user_depts else None
+        if not department:
+            frappe.throw("No active department assigned to your account.", frappe.PermissionError)
+    elif role == "KPI CEO":
+        if department and department not in user_depts:
+            frappe.throw("Access denied: You do not have access to this department.", frappe.PermissionError)
+        if not department:
+            if not user_depts:
+                frappe.throw("No KPI departments are configured in your CEO access. "
+                             "Ask an Administrator to configure your CEO Access.", frappe.PermissionError)
             department = user_depts[0]
     else:
         if not department:
+            if not user_depts:
+                frappe.throw("No active KPI Departments found. "
+                             "Please create at least one active KPI Department before using this dashboard.",
+                             frappe.DoesNotExistError)
             department = user_depts[0]
-        elif department not in user_depts and not frappe.db.exists("KPI Department", department):
-            frappe.throw(f"Department '{department}' does not exist.", frappe.DoesNotExistError)
+        elif not frappe.db.exists("KPI Department", department):
+            dept_match = frappe.db.get_value("KPI Department", {"department_code": department}, "name") or \
+                         frappe.db.get_value("KPI Department", {"department_name": department}, "name")
+            if dept_match:
+                department = dept_match
+            else:
+                frappe.throw(f"Department '{department}' does not exist.", frappe.DoesNotExistError)
 
     if not frequency or frequency == "All":
         frequency = frappe.db.get_single_value("KPI Settings", "default_frequency") or "Daily"
@@ -119,7 +218,7 @@ def get_department_dashboard(department=None, timeframe="6_months", horizon="nex
     from productix.kpi_tracking.services.analytics import get_department_performance
     perf = get_department_performance(
         department, timeframe=timeframe, horizon=horizon,
-        period=period, frequency=frequency
+        period=period, frequency=frequency, include_predictions=True
     )
 
     alert_filters = {"department": department, "status": ["in", ["Active", "Acknowledged"]]}
@@ -130,11 +229,27 @@ def get_department_dashboard(department=None, timeframe="6_months", horizon="nex
         order_by="creation desc", limit_page_length=10,
     )
     perf["alerts"] = alerts
+    perf["critical_count"] = frappe.db.count("KPI Alert", {"department": department, "status": "Active", "severity": "Critical"})
+    perf["warning_count"] = frappe.db.count("KPI Alert", {"department": department, "status": "Active", "severity": "Warning"})
+    perf["acknowledged_count"] = frappe.db.count("KPI Alert", {"department": department, "status": "Acknowledged"})
+    perf["resolved_count"] = frappe.db.count("KPI Alert", {"department": department, "status": "Resolved"})
+    perf["active_alerts_count"] = perf["critical_count"] + perf["warning_count"]
 
     dept_doc = frappe.get_doc("KPI Department", department)
-    perf["department_name"] = dept_doc.department_name or dept_doc.name
-    perf["department_code"] = dept_doc.name
+    perf["department_name"] = dept_doc.get_disambiguated_name() if hasattr(dept_doc, "get_disambiguated_name") else (dept_doc.department_name or dept_doc.name)
+    perf["department_raw_name"] = dept_doc.department_name or dept_doc.name
+    perf["location"] = getattr(dept_doc, "location", "") or ""
+    perf["department_code"] = getattr(dept_doc, "department_code", dept_doc.name) or dept_doc.name
     perf["is_admin"] = (role == "KPI Admin")
+    perf["is_ceo"] = (role == "KPI CEO")
+    perf["role"] = role
+
+    try:
+        from productix.kpi_tracking.services.machine_health import get_department_machines_health
+        perf["machine_health"] = get_department_machines_health(department)
+    except Exception as e:
+        frappe.log_error(f"Error getting department machine health: {e}")
+        perf["machine_health"] = None
 
     return perf
 
@@ -149,6 +264,12 @@ def get_kpi_detail(kpi_code, timeframe="6_months", horizon="next_month"):
     user_depts = _get_user_departments()
     if role != "KPI Admin" and kpi.department and kpi.department not in user_depts:
         frappe.throw(f"Access denied: You do not have permission to view KPI '{kpi_code}'.", frappe.PermissionError)
+
+    if role == "KPI CEO":
+        from productix.kpi_tracking.security.permissions import get_ceo_authorized_kpis
+        allowed_kpis = get_ceo_authorized_kpis(department=kpi.department)
+        if allowed_kpis is not None and kpi_code not in allowed_kpis:
+            frappe.throw(f"Access denied: You do not have permission to view KPI '{kpi_code}'.", frappe.PermissionError)
 
     from productix.kpi_tracking.services.analytics import (
         calculate_trend,
@@ -178,6 +299,13 @@ def get_kpi_detail(kpi_code, timeframe="6_months", horizon="next_month"):
         order_by="prediction_date desc", limit_page_length=6,
     )
 
+    kpi_alerts = frappe.db.get_all(
+        "KPI Alert",
+        filters={"kpi": kpi_code},
+        fields=["name", "alert_type", "severity", "trigger_period", "creation", "status", "message"],
+        order_by="creation desc", limit_page_length=5,
+    )
+
     return {
         "kpi": kpi.as_dict(),
         "history": history,
@@ -187,7 +315,33 @@ def get_kpi_detail(kpi_code, timeframe="6_months", horizon="next_month"):
         "predictions_all": multi_preds,
         "selected_prediction": multi_preds.get(horizon) or multi_preds.get("next_month") if multi_preds.get("available") else None,
         "latest": history[0] if history else None,
+        "alerts": kpi_alerts,
     }
+
+
+@frappe.whitelist()
+def get_kpi_options():
+    """Active KPI options (name + label) for selectors, scoped to the user's access."""
+    role = _check_kpi_access()
+    filters = {"is_active": 1}
+    if role == "KPI CEO":
+        ceo_depts = get_ceo_authorized_departments()
+        if ceo_depts:
+            filters["department"] = ["in", ceo_depts]
+    elif role == "KPI Employee":
+        user_depts = _get_user_departments()
+        if user_depts:
+            filters["department"] = ["in", user_depts]
+        else:
+            filters["name"] = ["in", ["__none__"]]
+
+    kpis = frappe.db.get_all(
+        "KPI Definition",
+        filters=filters,
+        fields=["name", "kpi_name", "kpi_code", "department"],
+        order_by="kpi_name asc",
+    )
+    return {"kpis": kpis}
 
 
 @frappe.whitelist()
@@ -196,31 +350,63 @@ def get_user_context():
     role = _check_kpi_access(user)
     departments = _get_user_departments(user)
 
-    department_list = []
-    if departments:
+    if role in ("KPI Admin", "KPI CEO"):
+        dept_filters = {"is_active": 1}
+        if role == "KPI CEO" and departments:
+            dept_filters["name"] = ["in", departments]
         department_list = frappe.get_all(
             "KPI Department",
-            filters={"name": ["in", departments], "is_active": 1},
-            fields=["name", "department_name", "department_code", "weight"],
+            filters=dept_filters,
+            fields=["name", "department_name", "department_code", "weight", "location"],
             order_by="department_name asc",
         )
+    else:
+        department_list = []
+        if departments:
+            department_list = frappe.get_all(
+                "KPI Department",
+                filters={"name": ["in", departments], "is_active": 1},
+                fields=["name", "department_name", "department_code", "weight", "location"],
+                order_by="department_name asc",
+            )
 
-    assigned_dept = departments[0] if (role != "KPI Admin" and departments) else None
+    for d in department_list:
+        label = d.department_name or d.name
+        if d.get("location"):
+            label += f" — {d.location}"
+        code = d.get("department_code") or d.name
+        if code and code != label:
+            label += f" [{code}]"
+        d["display_name"] = label
+
+    assigned_dept = department_list[0].name if (role == "KPI Employee" and department_list) else None
 
     user_full_name = frappe.db.get_value("User", user, "full_name") or user
 
     default_freq = frappe.db.get_single_value("KPI Settings", "default_frequency") or "Daily"
     default_curr = frappe.db.get_single_value("KPI Settings", "currency") or "PKR"
 
+    ceo_config = None
+    if role == "KPI CEO":
+        ceo = get_ceo_access(user)
+        if ceo:
+            ceo_config = {
+                "access_scope": ceo.access_scope,
+                "can_view_company_overview": ceo.can_view_company_overview,
+                "can_view_machines": ceo.can_view_machines,
+            }
+
     return {
         "user": user,
         "full_name": user_full_name,
         "role": role,
         "is_admin": role == "KPI Admin",
-        "is_employee": role != "KPI Admin",
+        "is_ceo": role == "KPI CEO",
+        "is_employee": role == "KPI Employee",
         "assigned_department": assigned_dept,
-        "departments": departments,
+        "departments": [d.name for d in department_list] if department_list else departments,
         "department_list": department_list,
+        "ceo_config": ceo_config,
         "setup_completed": frappe.db.get_single_value("KPI Settings", "setup_completed") or 0,
         "default_frequency": default_freq,
         "currency": default_curr,
@@ -228,46 +414,79 @@ def get_user_context():
 
 
 @frappe.whitelist()
-def get_action_center():
+def get_action_center(period=None, frequency=None):
     role = _check_kpi_access()
-    if role != "KPI Admin":
-        frappe.throw("Access denied: Action Center is restricted to administrators.", frappe.PermissionError)
 
-    user_depts = _get_user_departments()
+    if role == "KPI Employee":
+        frappe.throw("Access denied: Action Center is restricted to administrators and CEOs.", frappe.PermissionError)
+
+    ceo_depts = None
+    if role == "KPI CEO":
+        ceo_depts = get_ceo_authorized_departments()
 
     filters = {"status": ["in", ["Active", "Acknowledged"]]}
+    if ceo_depts:
+        filters["department"] = ["in", ceo_depts]
+
     alerts = frappe.db.get_all(
         "KPI Alert", filters=filters,
         fields=["name", "kpi", "department", "alert_type", "severity", "subject",
                 "message", "trigger_period", "status", "sender", "sender_name",
                 "sender_role", "creation"],
-        order_by="severity desc, creation desc", limit_page_length=40,
+        order_by="creation desc",
+        limit_page_length=200,
+    )
+    severity_order = {"Critical": 1, "Warning": 2, "Info": 3, "Informational": 3}
+    alerts.sort(key=lambda a: severity_order.get(a.get("severity"), 4))
+
+    from productix.kpi_tracking.api.data_entry import _get_data_entry_monitoring_internal
+    monitoring = _get_data_entry_monitoring_internal(
+        frequency=frequency, period=period, departments=ceo_depts
     )
 
-    all_kpis = frappe.db.get_all(
-        "KPI Definition",
-        filters={"is_active": 1, "department": ["in", user_depts]},
-        fields=["name", "kpi_name", "department", "frequency"],
-    )
     missing = []
-    for kpi in all_kpis:
-        latest = frappe.db.get_value(
-            "KPI Data Entry",
-            {"kpi": kpi.name, "docstatus": 1},
-            "entry_date", order_by="entry_date desc",
-        )
-        if not latest:
+    for dept_info in monitoring.get("departments", []):
+        if dept_info.get("missing_entries", 0) > 0:
             missing.append({
-                "kpi": kpi.kpi_name, "kpi_code": kpi.name,
-                "department": kpi.department, "status": "No data submitted",
-                "frequency": kpi.frequency or "Monthly",
+                "kpi": f"{dept_info['missing_entries']} Pending Metric(s)",
+                "department": dept_info["department_code"],
+                "department_name": dept_info["department"],
+                "missing_entries": dept_info["missing_entries"],
+                "completed_entries": dept_info["completed_entries"],
+                "required_entries": dept_info["required_entries"],
+                "period": dept_info["period"],
+                "frequency": dept_info.get("frequency", "Monthly"),
+                "assigned_employees": dept_info.get("assigned_employees", []),
+                "status": f"{dept_info['missing_entries']} pending submissions",
             })
+
+    active_alerts = [a for a in alerts if a.status == "Active"]
+
+    base_alert_filter = {}
+    if ceo_depts:
+        base_alert_filter["department"] = ["in", ceo_depts]
+
+    critical_count = frappe.db.count("KPI Alert", {**base_alert_filter, "status": "Active", "severity": "Critical"})
+    warning_count = frappe.db.count("KPI Alert", {**base_alert_filter, "status": "Active", "severity": "Warning"})
+    acknowledged_count = frappe.db.count("KPI Alert", {**base_alert_filter, "status": "Acknowledged"})
+    resolved_count = frappe.db.count("KPI Alert", {**base_alert_filter, "status": "Resolved"})
+    total_active_alerts = critical_count + warning_count
+    missing_count = sum(m["missing_entries"] for m in missing)
 
     return {
         "alerts": alerts,
+        "active_alerts": active_alerts,
         "missing_data": missing,
-        "total_items": len(alerts) + len(missing),
-        "is_admin": True,
+        "critical_count": critical_count,
+        "warning_count": warning_count,
+        "acknowledged_count": acknowledged_count,
+        "resolved_count": resolved_count,
+        "missing_count": missing_count,
+        "total_active_items": total_active_alerts + missing_count,
+        "total_items": total_active_alerts + acknowledged_count + missing_count,
+        "is_admin": role == "KPI Admin",
+        "is_ceo": role == "KPI CEO",
+        "role": role,
     }
 
 

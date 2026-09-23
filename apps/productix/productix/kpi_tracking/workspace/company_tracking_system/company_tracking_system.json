@@ -1,7 +1,7 @@
 {
  "charts": [],
- "content": "[{\"id\": \"hdr_main\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h3\\\"><b>Company Tracking System</b></span>\", \"col\": 12}}, {\"id\": \"hdr_shortcuts\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Actions &amp; Dashboards</b></span>\", \"col\": 12}}, {\"id\": \"sc_overview\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Company Overview\", \"col\": 3}}, {\"id\": \"sc_dept\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Department Dashboard\", \"col\": 3}}, {\"id\": \"sc_data_entry\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Data Entry\", \"col\": 3}}, {\"id\": \"sc_formula\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Formula Builder\", \"col\": 3}}, {\"id\": \"sc_ai\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"AI Assistant\", \"col\": 3}}, {\"id\": \"sc_action\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Action Center\", \"col\": 3}}, {\"id\": \"sc_kpi_def\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Definitions\", \"col\": 3}}, {\"id\": \"sc_kpi_alert\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Alerts\", \"col\": 3}}, {\"id\": \"sp_cards\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr_cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Masters, Reports &amp; Configuration</b></span>\", \"col\": 12}}, {\"id\": \"cd_dashboards\", \"type\": \"card\", \"data\": {\"card_name\": \"Dashboards & AI Tools\", \"col\": 4}}, {\"id\": \"cd_operations\", \"type\": \"card\", \"data\": {\"card_name\": \"Data Entry & Operations\", \"col\": 4}}, {\"id\": \"cd_reports\", \"type\": \"card\", \"data\": {\"card_name\": \"KPI Reports & Analytics\", \"col\": 4}}, {\"id\": \"cd_formulas\", \"type\": \"card\", \"data\": {\"card_name\": \"KPI Formulas & Templates\", \"col\": 4}}, {\"id\": \"cd_setup\", \"type\": \"card\", \"data\": {\"card_name\": \"Setup & Master Data\", \"col\": 4}}]",
- "creation": "2026-09-19 04:43:39.160558",
+ "content": "[{\"id\": \"hdr_main\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h3\\\"><b>Company Tracking System</b></span>\", \"col\": 12}}, {\"id\": \"hdr_shortcuts\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Actions &amp; Dashboards</b></span>\", \"col\": 12}}, {\"id\": \"sc_overview\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Company Overview\", \"col\": 3}}, {\"id\": \"sc_dept\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Department Dashboard\", \"col\": 3}}, {\"id\": \"sc_machine\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Machine Health\", \"col\": 3}}, {\"id\": \"sc_data_entry\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Data Entry\", \"col\": 3}}, {\"id\": \"sc_formula\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Formula Builder\", \"col\": 3}}, {\"id\": \"sc_ai\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"AI Assistant\", \"col\": 3}}, {\"id\": \"sc_action\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Action Center\", \"col\": 3}}, {\"id\": \"sc_kpi_def\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"KPI Definitions\", \"col\": 3}}, {\"id\": \"sc_backup\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Backup Manager\", \"col\": 3}}, {\"id\": \"sp_cards\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr_cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Masters, Reports &amp; Configuration</b></span>\", \"col\": 12}}, {\"id\": \"cd_dashboards\", \"type\": \"card\", \"data\": {\"card_name\": \"Dashboards & AI Tools\", \"col\": 4}}, {\"id\": \"cd_operations\", \"type\": \"card\", \"data\": {\"card_name\": \"Data Entry & Operations\", \"col\": 4}}, {\"id\": \"cd_machines\", \"type\": \"card\", \"data\": {\"card_name\": \"Machine Health Monitoring\", \"col\": 4}}, {\"id\": \"cd_reports\", \"type\": \"card\", \"data\": {\"card_name\": \"KPI Reports & Analytics\", \"col\": 4}}, {\"id\": \"cd_formulas\", \"type\": \"card\", \"data\": {\"card_name\": \"KPI Formulas & Templates\", \"col\": 4}}, {\"id\": \"cd_setup\", \"type\": \"card\", \"data\": {\"card_name\": \"Setup & Master Data\", \"col\": 4}}]",
+ "creation": "2026-09-23 06:15:31.668552",
  "custom_blocks": [],
  "docstatus": 0,
  "doctype": "Workspace",
@@ -117,6 +117,65 @@
    "label": "KPI Alert",
    "link_count": 0,
    "link_to": "KPI Alert",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Machine Health Monitoring",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Machine Health Dashboard",
+   "link_count": 0,
+   "link_to": "machine-health",
+   "link_type": "Page",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Machine",
+   "link_count": 0,
+   "link_to": "Machine",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Machine Type",
+   "link_count": 0,
+   "link_to": "Machine Type",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Machine Reading",
+   "link_count": 0,
+   "link_to": "Machine Reading",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Machine Health Log",
+   "link_count": 0,
+   "link_to": "Machine Health Log",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -311,7 +370,7 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Download Backups",
+   "label": "Enterprise Backup & Restore Manager",
    "link_count": 0,
    "link_to": "backups",
    "link_type": "Page",
@@ -319,7 +378,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-19 04:43:39.160558",
+ "modified": "2026-09-23 06:16:14.477287",
  "modified_by": "Administrator",
  "module": "KPI Tracking",
  "name": "Company Tracking System",
@@ -347,6 +406,9 @@
    "role": "KPI Contributor"
   },
   {
+   "role": "KPI CEO"
+  },
+  {
    "role": "Desk User"
   },
   {
@@ -367,6 +429,13 @@
    "doc_view": "",
    "label": "Department Dashboard",
    "link_to": "kpi-department-dashboard",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Machine Health",
+   "link_to": "machine-health",
    "type": "Page"
   },
   {
@@ -410,6 +479,13 @@
    "label": "KPI Alerts",
    "link_to": "KPI Alert",
    "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Backup Manager",
+   "link_to": "backups",
+   "type": "Page"
   }
  ],
  "title": "Company Tracking System"

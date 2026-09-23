@@ -12,8 +12,8 @@ frappe.pages["kpi-action-center"].on_page_load = function (wrapper) {
     // Check user context for Admin authorization
     frappe.xcall("productix.kpi_tracking.api.dashboard.get_user_context").then((ctx) => {
         page._ctx = ctx || {};
-        if (!ctx.is_admin) {
-            frappe.show_alert({ message: "Action Center is restricted to administrators.", indicator: "orange" });
+        if (!ctx.is_admin && !ctx.is_ceo) {
+            frappe.show_alert({ message: "Action Center is restricted to administrators and CEOs.", indicator: "orange" });
             frappe.set_route("kpi-department-dashboard");
             return;
         }
@@ -40,6 +40,7 @@ function setup_action_center_actions(page) {
     page.add_menu_item("🏢 Company Performance Overview", () => frappe.set_route("kpi-company-overview"));
     page.add_menu_item("🤖 AI Assistant", () => frappe.set_route("kpi-ai-assistant"));
     page.add_menu_item("✍️ Metric Data Entry", () => frappe.set_route("kpi-data-entry-page"));
+    page.add_menu_item("💾 Backup & Restore Manager", () => frappe.set_route("backups"));
     page.add_menu_item("📋 All Alert Logs", () => frappe.set_route("List", "KPI Alert"));
 }
 
@@ -63,27 +64,42 @@ function load_actions(page) {
 function render_actions(page, data) {
     const alerts = data.alerts || [];
     const missing = data.missing_data || [];
-    const critical_count = alerts.filter((a) => a.severity === "Critical").length;
-    const warning_count = alerts.filter((a) => a.severity === "Warning").length;
+    const critical_count = data.critical_count !== undefined ? data.critical_count : alerts.filter((a) => a.severity === "Critical" && a.status === "Active").length;
+    const warning_count = data.warning_count !== undefined ? data.warning_count : alerts.filter((a) => a.severity === "Warning" && a.status === "Active").length;
+    const acknowledged_count = data.acknowledged_count !== undefined ? data.acknowledged_count : alerts.filter((a) => a.status === "Acknowledged").length;
+    const missing_count = data.missing_count !== undefined ? data.missing_count : missing.length;
+    const total_active_items = data.total_active_items !== undefined ? data.total_active_items : (critical_count + warning_count + missing_count);
 
     let alertsHtml = '';
     if (alerts.length > 0) {
         alertsHtml = `
             <div style="margin-bottom:24px;">
-                <h5 style="font-weight:700;font-size:15px;color:#0f172a;margin-bottom:14px;">🚨 Active Performance Alerts (${alerts.length})</h5>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+                    <h5 style="font-weight:700;font-size:15px;color:#0f172a;margin:0;">🚨 Performance Alerts (${alerts.length})</h5>
+                    <div style="display:flex;gap:6px;">
+                        <button class="btn btn-xs btn-default" id="btn-ack-all-alerts" style="font-weight:600;">
+                            👁️ Acknowledge All Active
+                        </button>
+                        <button class="btn btn-xs btn-success" id="btn-resolve-all-alerts" style="font-weight:600;">
+                            ✅ Resolve All Active (${alerts.length})
+                        </button>
+                    </div>
+                </div>
                 <div style="display:flex;flex-direction:column;gap:10px;">
                     ${alerts.map(a => {
                         const isCrit = a.severity === 'Critical';
                         const isWarn = a.severity === 'Warning';
                         const isEscalation = a.alert_type === 'Employee Escalation';
-                        const borderCol = isCrit ? '#ef4444' : (isEscalation ? '#6366f1' : '#f59e0b');
+                        const isAck = a.status === 'Acknowledged';
+                        const borderCol = isAck ? '#94a3b8' : (isCrit ? '#ef4444' : (isEscalation ? '#6366f1' : '#f59e0b'));
                         const badgeClass = isCrit ? 'badge-danger' : (isEscalation ? 'badge-primary' : 'badge-warning');
                         return `
-                            <div class="card" style="border:1px solid #e2e8f0;border-left:4px solid ${borderCol};border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+                            <div class="card" style="border:1px solid #e2e8f0;border-left:4px solid ${borderCol};border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.03);opacity:${isAck ? '0.85' : '1'};">
                                 <div class="card-body" style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                                     <div style="flex:1;min-width:260px;">
                                         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
                                             <span class="badge ${badgeClass}" style="font-size:11px;">${a.severity}</span>
+                                            <span class="badge ${isAck ? 'badge-info' : 'badge-success'}" style="font-size:10px;">${a.status}</span>
                                             <strong style="font-size:14px;color:#0f172a;">${a.subject || a.alert_type}</strong>
                                             <span style="font-size:12px;color:#64748b;">· Department: <strong>${a.department || 'General'}</strong></span>
                                             ${a.sender_name ? `<span style="font-size:11px;color:#6366f1;background:#f5f3ff;padding:1px 6px;border-radius:4px;">From: ${a.sender_name} (${a.sender_role || 'Employee'})</span>` : ''}
@@ -121,8 +137,8 @@ function render_actions(page, data) {
                                 <div>
                                     <span class="badge badge-secondary" style="font-size:11px;margin-right:6px;">Pending</span>
                                     <strong style="font-size:14px;color:#0f172a;">${m.kpi}</strong>
-                                    <span style="font-size:12px;color:#64748b;margin-left:6px;">· Department: <strong>${m.department}</strong> (${m.frequency || 'Monthly'})</span>
-                                    <div style="font-size:12px;color:#94a3b8;margin-top:2px;">No actual value logged for current reporting cycle.</div>
+                                    <span style="font-size:12px;color:#64748b;margin-left:6px;">· Department: <strong>${m.department_name || m.department}</strong> (${m.frequency || 'Monthly'})</span>
+                                    <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Period: ${m.period || '--'} · Completed: ${m.completed_entries || 0}/${m.required_entries || 0} required metrics</div>
                                 </div>
                                 <div style="display:flex;gap:6px;">
                                     <button class="btn btn-xs btn-default send-dept-reminder-btn" data-dept="${m.department}" style="font-weight:600;">
@@ -193,7 +209,7 @@ function render_actions(page, data) {
             </div>
 
             <!-- Summary Status Cards -->
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px;">
                 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;text-align:center;">
                     <div style="font-size:24px;font-weight:800;color:${critical_count > 0 ? '#ef4444' : '#10b981'};">${critical_count}</div>
                     <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;margin-top:2px;">Critical Alerts</div>
@@ -203,12 +219,16 @@ function render_actions(page, data) {
                     <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;margin-top:2px;">Warnings</div>
                 </div>
                 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;text-align:center;">
-                    <div style="font-size:24px;font-weight:800;color:#64748b;">${missing.length}</div>
+                    <div style="font-size:24px;font-weight:800;color:#6366f1;">${acknowledged_count}</div>
+                    <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;margin-top:2px;">Acknowledged</div>
+                </div>
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;text-align:center;">
+                    <div style="font-size:24px;font-weight:800;color:${missing_count > 0 ? '#f97316' : '#10b981'};">${missing_count}</div>
                     <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;margin-top:2px;">Missing Submissions</div>
                 </div>
                 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;text-align:center;">
-                    <div style="font-size:24px;font-weight:800;color:#0f172a;">${data.total_items || 0}</div>
-                    <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;margin-top:2px;">Total Action Items</div>
+                    <div style="font-size:24px;font-weight:800;color:#0f172a;">${total_active_items}</div>
+                    <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;margin-top:2px;">Active Action Items</div>
                 </div>
             </div>
 
@@ -223,22 +243,61 @@ function render_actions(page, data) {
     // Acknowledge Button
     page.main.find(".ack-btn").on("click", function () {
         const name = $(this).data("name");
-        frappe.xcall("frappe.client.set_value", {
-            doctype: "KPI Alert", name: name, fieldname: "status", value: "Acknowledged",
+        frappe.xcall("productix.kpi_tracking.services.alert_engine.acknowledge_alert", {
+            alert_name: name,
         }).then(() => {
             frappe.show_alert({ message: "Alert acknowledged", indicator: "blue" });
             load_actions(page);
+        }).catch(() => {
+            frappe.xcall("frappe.client.set_value", {
+                doctype: "KPI Alert", name: name, fieldname: "status", value: "Acknowledged",
+            }).then(() => {
+                frappe.show_alert({ message: "Alert acknowledged", indicator: "blue" });
+                load_actions(page);
+            });
+        });
+    });
+
+    // Acknowledge All Button
+    page.main.find("#btn-ack-all-alerts").on("click", function () {
+        const btn = $(this);
+        btn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Acknowledging...');
+        frappe.xcall("productix.kpi_tracking.services.alert_engine.acknowledge_all_alerts").then((res) => {
+            frappe.show_alert({ message: res.message || "All active alerts acknowledged", indicator: "blue" });
+            load_actions(page);
+        }).catch((err) => {
+            btn.prop("disabled", false).html("👁️ Acknowledge All Active");
+            frappe.show_alert({ message: "Error acknowledging alerts: " + (err.message || ""), indicator: "red" });
+        });
+    });
+
+    // Resolve All Button
+    page.main.find("#btn-resolve-all-alerts").on("click", function () {
+        frappe.confirm("Mark all active alerts as Resolved?", function () {
+            frappe.xcall("productix.kpi_tracking.services.alert_engine.resolve_all_alerts").then((res) => {
+                frappe.show_alert({ message: res.message || "✅ All active alerts resolved", indicator: "green" });
+                load_actions(page);
+            }).catch((err) => {
+                frappe.show_alert({ message: "Error resolving alerts: " + (err.message || ""), indicator: "red" });
+            });
         });
     });
 
     // Resolve Button
     page.main.find(".resolve-btn").on("click", function () {
         const name = $(this).data("name");
-        frappe.xcall("frappe.client.set_value", {
-            doctype: "KPI Alert", name: name, fieldname: "status", value: "Resolved",
+        frappe.xcall("productix.kpi_tracking.services.alert_engine.resolve_alert", {
+            alert_name: name,
         }).then(() => {
             frappe.show_alert({ message: "✅ Alert marked as Resolved", indicator: "green" });
             load_actions(page);
+        }).catch(() => {
+            frappe.xcall("frappe.client.set_value", {
+                doctype: "KPI Alert", name: name, fieldname: "status", value: "Resolved",
+            }).then(() => {
+                frappe.show_alert({ message: "✅ Alert marked as Resolved", indicator: "green" });
+                load_actions(page);
+            });
         });
     });
 

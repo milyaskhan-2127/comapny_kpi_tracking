@@ -1,6 +1,12 @@
 import frappe
 from frappe.model.document import Document
 from frappe.utils import getdate
+from productix.kpi_tracking.services.period_engine import (
+    get_current_period,
+    calculate_raw_achievement_percentage,
+    calculate_normalized_score,
+    get_status_from_score,
+)
 
 
 class KPIDataEntry(Document):
@@ -22,24 +28,13 @@ class KPIDataEntry(Document):
         )
 
     def _set_period(self):
+        if self.period:
+            return
         kpi_doc = frappe.get_cached_doc("KPI Definition", self.kpi)
         d = getdate(self.entry_date)
         company_freq = frappe.db.get_single_value("KPI Settings", "default_frequency") or "Daily"
         freq = kpi_doc.frequency or company_freq
-        if freq == "Daily":
-            self.period = d.strftime("%Y-%m-%d")
-        elif freq == "Weekly":
-            iso = d.isocalendar()
-            self.period = f"{iso[0]}-W{iso[1]:02d}"
-        elif freq == "Monthly":
-            self.period = d.strftime("%Y-%m")
-        elif freq == "Quarterly":
-            q = (d.month - 1) // 3 + 1
-            self.period = f"{d.year}-Q{q}"
-        elif freq == "Yearly":
-            self.period = str(d.year)
-        else:
-            self.period = d.strftime("%Y-%m-%d") if freq == "Daily" else d.strftime("%Y-%m")
+        self.period = get_current_period(freq, d)
 
     def _fetch_target(self):
         kpi_doc = frappe.get_cached_doc("KPI Definition", self.kpi)
@@ -57,61 +52,31 @@ class KPIDataEntry(Document):
         target = float(self.target_value or 0.0)
         actual = float(self.actual_value if self.actual_value is not None else 0.0)
 
-        if target_type == "No Target":
-            self.achievement_percentage = 100.0
-            return
-
-        if direction == "Lower is Better":
-            if actual <= 0:
-                self.achievement_percentage = 100.0
-            elif target <= 0:
-                # Target is 0 (e.g. zero accidents). Each unit over 0 reduces achievement
-                self.achievement_percentage = round(max(0.0, min(100.0, 100.0 - (actual * 25.0))), 2)
-            else:
-                if actual <= target:
-                    self.achievement_percentage = 100.0
-                else:
-                    self.achievement_percentage = round(max(0.0, min(100.0, (target / actual) * 100.0)), 2)
-
-        elif direction == "Target Range":
-            min_val = float(kpi_doc.minimum_acceptable if kpi_doc.minimum_acceptable is not None else 0.0)
-            max_val = float(target if target != 0 else min_val)
-            if min_val <= actual <= max_val:
-                self.achievement_percentage = 100.0
-            elif actual < min_val:
-                self.achievement_percentage = round(max(0.0, min(100.0, (actual / min_val * 100.0) if min_val != 0 else 0.0)), 2)
-            else:
-                self.achievement_percentage = round(max(0.0, min(100.0, (max_val / actual * 100.0) if actual != 0 else 0.0)), 2)
-
-        elif direction == "Exact Target":
-            if target == 0:
-                self.achievement_percentage = 100.0 if actual == 0 else 0.0
-            else:
-                variance = abs(actual - target)
-                variance_pct = (variance / abs(target)) * 100.0
-                self.achievement_percentage = round(max(0.0, min(100.0, 100.0 - variance_pct)), 2)
-
-        else:  # Higher is Better
-            if target <= 0:
-                self.achievement_percentage = 100.0 if actual >= 0 else 0.0
-            else:
-                self.achievement_percentage = round(max(0.0, min(100.0, (actual / target) * 100.0)), 2)
-
-        # Ensure strictly bounded to [0.0, 100.0]
-        self.achievement_percentage = round(max(0.0, min(100.0, float(self.achievement_percentage or 0.0))), 2)
+        raw_ach = calculate_raw_achievement_percentage(
+            actual=actual,
+            target=target,
+            direction=direction,
+            target_type=target_type,
+            minimum_acceptable=kpi_doc.minimum_acceptable,
+        )
+        norm_score = calculate_normalized_score(
+            actual=actual,
+            target=target,
+            direction=direction,
+            target_type=target_type,
+            minimum_acceptable=kpi_doc.minimum_acceptable,
+        )
+        self.achievement_percentage = raw_ach if raw_ach is not None else 0.0
+        self.normalized_score = norm_score if norm_score is not None else 0.0
 
     def _set_status(self):
         kpi_doc = frappe.get_cached_doc("KPI Definition", self.kpi)
-        warn = float(kpi_doc.warning_threshold if kpi_doc.warning_threshold is not None else 80.0)
-        crit = float(kpi_doc.critical_threshold if kpi_doc.critical_threshold is not None else 60.0)
-        ach = float(self.achievement_percentage if self.achievement_percentage is not None else 0.0)
-
-        if ach >= warn:
-            self.status = "On Track"
-        elif ach >= crit:
-            self.status = "Warning"
-        else:
-            self.status = "Critical"
+        score_for_status = self.normalized_score if self.normalized_score is not None else self.achievement_percentage
+        self.status = get_status_from_score(
+            score=score_for_status,
+            warning_threshold=kpi_doc.warning_threshold,
+            critical_threshold=kpi_doc.critical_threshold,
+        )
 
     def _check_duplicate(self):
         filters = {

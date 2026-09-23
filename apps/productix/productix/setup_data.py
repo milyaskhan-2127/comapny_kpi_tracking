@@ -112,14 +112,21 @@ def _create_roles():
         {"role_name": "Purchase Manager", "desk_access": 1},
         {"role_name": "General Staff", "desk_access": 1},
     ]
-    for r in roles:
+    kpi_roles = [
+        {"role_name": "KPI Admin", "desk_access": 1},
+        {"role_name": "KPI Employee", "desk_access": 1},
+        {"role_name": "KPI Manager", "desk_access": 1},
+        {"role_name": "KPI Contributor", "desk_access": 1},
+        {"role_name": "KPI CEO", "desk_access": 1},
+    ]
+    for r in (roles + kpi_roles):
         if not frappe.db.exists("Role", r["role_name"]):
             frappe.get_doc({
                 "doctype": "Role",
                 "role_name": r["role_name"],
                 "desk_access": r.get("desk_access", 1),
             }).insert(ignore_permissions=True)
-    print("  ✓ 6 Factory Roles configured.")
+    print(f"  ✓ {len(roles)} Factory Roles + {len(kpi_roles)} KPI Roles configured.")
 
 
 def _create_license():
@@ -264,7 +271,7 @@ def _get_company_and_warehouse():
         if not frappe.db.exists("Warehouse Type", wt):
             frappe.get_doc({"doctype": "Warehouse Type", "name": wt}).insert(ignore_permissions=True)
 
-    company_name = frappe.defaults.get_user_default("Company") or frappe.db.get_value("Company", {}, "name") or "Apex Chemical Industries"
+    company_name = frappe.defaults.get_user_default("Company") or frappe.db.get_value("Company", {}, "name") or "Main Company"
     if not frappe.db.exists("Company", company_name):
         c = frappe.get_doc({
             "doctype": "Company",

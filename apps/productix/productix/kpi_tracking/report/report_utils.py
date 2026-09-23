@@ -3,21 +3,27 @@ from frappe import _
 from frappe.utils import flt, getdate, today
 from productix.kpi_tracking.security.permissions import (
     is_kpi_admin,
+    is_kpi_ceo,
     get_user_authorized_department,
 )
 from productix.kpi_tracking.api.dashboard import _check_kpi_access, _get_user_departments
+from productix.kpi_tracking.services.period_engine import (
+    calculate_normalized_score,
+    get_status_from_score,
+)
 
 
 def get_authorized_departments_for_report(filters=None, user=None):
     """
-    Enforces strict Administrator security for KPI reports.
-    Reports are strictly visible and accessible to Administrators only.
+    Enforces strict security for KPI reports.
+    Reports are strictly visible and accessible to KPI Administrators and KPI CEOs (read-only).
+    KPI Employees are blocked.
     """
-    user = user or frappe.session.user
+    user = user or (getattr(frappe, "session", None) and getattr(frappe.session, "user", None)) or "Administrator"
     role = _check_kpi_access(user)
 
-    if role != "KPI Admin" and not is_kpi_admin(user):
-        frappe.throw(_("Access denied: KPI Reports are restricted to KPI Administrators."), frappe.PermissionError)
+    if role not in ("KPI Admin", "KPI CEO") and not is_kpi_admin(user) and not is_kpi_ceo(user):
+        frappe.throw(_("Access denied: KPI Reports are restricted to KPI Administrators and Executives."), frappe.PermissionError)
 
     user_depts = _get_user_departments(user)
     if not user_depts:
@@ -28,6 +34,8 @@ def get_authorized_departments_for_report(filters=None, user=None):
         requested_dept = None
 
     if requested_dept:
+        if requested_dept not in user_depts and not is_kpi_admin(user):
+            frappe.throw(_("You are not authorized to view reports for department '{0}'.").format(requested_dept), frappe.PermissionError)
         if not frappe.db.exists("KPI Department", requested_dept):
             frappe.throw(_("Department '{0}' does not exist.").format(requested_dept), frappe.DoesNotExistError)
         return [requested_dept], requested_dept
@@ -72,10 +80,10 @@ def calculate_kpi_variance(actual, target, direction="Higher is Better"):
     return round(variance, 2), round(variance_pct, 2), status
 
 
-def calculate_kpi_variance_and_score(actual, target, direction="Higher is Better", warning_threshold=80.0, critical_threshold=60.0):
+def calculate_kpi_variance_and_score(actual, target, direction="Higher is Better", warning_threshold=80.0, critical_threshold=60.0, target_type="Fixed Target", minimum_acceptable=None):
     """
     Comprehensive variance, normalized score, and achievement status evaluator
-    consistent with KPIDataEntry calculation engine.
+    consistent with central Period Engine and calculation engine.
     """
     if actual is None or target is None:
         return {
@@ -92,40 +100,29 @@ def calculate_kpi_variance_and_score(actual, target, direction="Higher is Better
     variance = act - tgt
     variance_pct = (variance / abs(tgt) * 100.0) if tgt != 0 else 0.0
 
-    if direction == "Lower is Better":
-        if act == 0 and tgt == 0:
-            raw_score = 100.0
-        elif act == 0:
-            raw_score = 100.0
-        elif tgt == 0:
-            raw_score = 0.0
-        else:
-            raw_score = (tgt / act) * 100.0
-    elif direction == "Target Range" or direction == "Exact Target":
-        if abs(tgt) < 1e-9:
-            raw_score = 100.0 if abs(act) < 1e-9 else 0.0
-        else:
-            deviation_pct = abs(variance) / abs(tgt) * 100.0
-            raw_score = max(0.0, 100.0 - deviation_pct)
-    else:  # Higher is Better
-        if abs(tgt) < 1e-9:
-            raw_score = 100.0 if act >= 0 else 0.0
-        else:
-            raw_score = (act / tgt) * 100.0
+    norm_score = calculate_normalized_score(
+        actual=act,
+        target=tgt,
+        direction=direction,
+        target_type=target_type,
+        minimum_acceptable=minimum_acceptable,
+    )
 
-    norm_score = max(0.0, min(100.0, raw_score))
-
-    if norm_score >= 100.0 and act != tgt and direction in ("Higher is Better", "Lower is Better"):
-        status = "Above Target"
-    elif norm_score >= flt(warning_threshold or 80.0):
-        status = "Meeting Target"
+    if norm_score is not None:
+        norm_score = max(0.0, min(100.0, flt(norm_score)))
+        if norm_score >= 100.0 and act != tgt and direction in ("Higher is Better", "Lower is Better"):
+            status = "Above Target"
+        elif norm_score >= flt(warning_threshold or 80.0):
+            status = "Meeting Target"
+        else:
+            status = "Below Target"
     else:
-        status = "Below Target"
+        status = "Missing Data"
 
     return {
         "variance": round(variance, 2),
         "variance_pct": round(variance_pct, 2),
-        "score": round(norm_score, 1),
+        "score": round(norm_score, 1) if norm_score is not None else None,
         "status": status,
     }
 

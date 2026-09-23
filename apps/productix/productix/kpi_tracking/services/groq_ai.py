@@ -4,23 +4,20 @@ import os
 import requests
 
 CORE_DIRECTIVE = (
-    "You are the Productix KPI & Operations Virtual Assistant — an intelligent, natural, and conversational AI advisor embedded in the enterprise ERP.\n\n"
-    "CRITICAL CONVERSATIONAL GUIDELINES:\n"
-    "1. NATURAL & CONVERSATIONAL:\n"
-    "   - Act like a real, helpful executive chatbot.\n"
-    "   - If the user sends a greeting (e.g. 'hi', 'hello', 'hey', 'good morning', etc.), respond naturally and warmly: "
-    "     'Hello! I am your KPI & Operations virtual assistant. How can I help you today?'\n"
-    "   - For general questions, respond conversationally, directly, and politely.\n\n"
-    "2. DIRECT & TO THE POINT:\n"
-    "   - Be concise and actionable. Do not give lengthy, unnecessary explanations or repetitive filler paragraphs.\n"
-    "   - Answer the specific question asked immediately.\n\n"
-    "3. CLEAN & SPACIOUS FORMATTING (NEVER CONGESTED):\n"
-    "   - Use clean Markdown with double line breaks between distinct thoughts and sections.\n"
-    "   - Use neat bullet points with bold highlights (**Department Name**, **Metric**, **Actual vs Target**) for readability.\n"
-    "   - Keep answers easy to scan at a glance.\n\n"
-    "4. DATA GROUNDING:\n"
-    "   - When answering questions about department metrics, missing submissions, bottlenecks, or performance rankings, reference the real figures provided in the ENTERPRISE OPERATIONAL CONTEXT below.\n"
-    "   - If suggesting an alert to be sent to a department with missing data, state the department name and assigned employees clearly."
+    "You are the Productix KPI & Operations Virtual Assistant — an executive-grade, highly structured operational advisor embedded in the enterprise ERP.\n\n"
+    "CRITICAL CONVERSATIONAL & FORMATTING RULES:\n"
+    "1. STRUCTURE & CONCISENESS (NEVER CONGESTED OR VERBOSE):\n"
+    "   - Keep answers structured, crisp, and direct to the point. Avoid dense walls of text or conversational fluff.\n"
+    "   - Use clean Markdown with double line breaks between points and sections.\n"
+    "   - Present recommendations and insights as clean bullet points with bold highlights.\n\n"
+    "2. STRICT DATA ACCURACY (NO HALLUCINATIONS):\n"
+    "   - Ground all statements in the ENTERPRISE OPERATIONAL CONTEXT provided below.\n"
+    "   - If departments have missing data entries, accurately list each department, the exact number of missing metrics, and assigned employees.\n"
+    "   - Never claim all submissions are complete if there are departments with missing entries > 0.\n\n"
+    "3. ACTIONABLE GUIDANCE:\n"
+    "   - For operational improvement questions, provide 3 to 4 high-impact, prioritized, department-specific action steps based on actual KPI variances.\n\n"
+    "4. GREETINGS & CASUAL INPUTS:\n"
+    "   - For simple greetings ('hi', 'hello', 'hey'), respond concisely: 'Hello! I am your KPI & Operations Assistant. How can I assist you with operational metrics, missing submissions, or department performance today?'"
 )
 
 SPECIALIST_PROMPTS = {
@@ -165,7 +162,7 @@ def get_ai_response(specialist_type, question, context_data, filters=None, histo
 
 
 def generate_local_diagnostic(specialist_type, question, context_data):
-    """Fallback generator providing clean, conversational answers."""
+    """Fallback generator providing clean, structured, scannable operational answers."""
     q_lower = (question or "").strip().lower()
 
     # 1. Greetings
@@ -183,34 +180,99 @@ def generate_local_diagnostic(specialist_type, question, context_data):
     alerts = context_data.get("active_alerts", [])
 
     # 2. Missing Data Queries
-    if any(k in q_lower for k in ["missing", "pending", "who has not", "not entered", "entry"]):
-        if not missing_list:
-            return "✅ **All Data Entries Complete**: All operational departments have submitted their required metrics for the current reporting period."
-
+    if any(k in q_lower for k in ["missing", "pending", "who has not", "not entered", "entry", "unsubmitted"]):
         pending_depts = [m for m in missing_list if m.get("missing_entries", 0) > 0]
         total_missing = sum(m.get("missing_entries", 0) for m in pending_depts)
 
         if not pending_depts:
-            return "✅ **All Data Entries Complete**: All operational departments have completed their required submissions."
+            return "✅ **All Data Entries Complete**\n\nAll operational departments have submitted their required metrics for the active reporting period."
 
         lines = [
-            f"Here is the status of pending submissions for **{company_name}**:\n",
+            f"**Pending KPI Submissions Status — {company_name}**\n",
             f"There are **{total_missing} missing metric entries** across **{len(pending_depts)} departments**:\n",
         ]
         for m in pending_depts:
             emps = ", ".join(m.get("assigned_employees", [])) or "No employees assigned"
-            lines.append(f"• **{m.get('department')}**: **{m.get('missing_entries')}** pending ({m.get('completed_entries')}/{m.get('required_entries')} done) — Assigned: {emps}\n")
+            lines.append(f"• **{m.get('department')}**: **{m.get('missing_entries')}** pending metric(s) ({m.get('completed_entries', 0)}/{m.get('required_entries', 0)} logged) — Assigned: *{emps}*\n")
 
         lines.append("💡 *You can click **📢 Send Alert** below to notify the relevant department employees.*")
         return "\n".join(lines)
 
-    # 3. Critical KPIs Queries
-    if any(k in q_lower for k in ["critical", "warning", "below target", "fail", "bad", "worst"]):
-        if not crit_kpis:
-            return "✅ **No Critical KPI Deviations**: All operational KPIs with logged entries are currently performing within target thresholds."
+    # 3. Machine Health Queries
+    if any(k in q_lower for k in ["machine", "equipment", "motor", "pump", "compressor", "line health", "health score", "maintenance"]):
+        ms = context_data.get("machines_summary")
+        if not ms or ms.get("total", 0) == 0:
+            return (
+                "⚙️ **Machine Health Fleet Status**\n\n"
+                "There are currently **0 active machines** registered in the Machine Health Monitoring system.\n\n"
+                "To begin monitoring equipment vibration, temperature, and pressure parameters, register machines under **Machine List** and link them to operational departments."
+            )
+
+        crit_machines = ms.get("critical_machines", [])
+        lines = [
+            f"⚙️ **Machine Fleet Health Status — {company_name}**\n",
+            f"Active Fleet: **{ms['total']} machines** | 🟢 Healthy: **{ms['healthy']}** | 🟡 Good: **{ms['good']}** | 🟠 Warning: **{ms['warning']}** | 🔴 Critical: **{ms['critical']}**\n",
+        ]
+
+        if crit_machines:
+            lines.append(f"**Attention Required ({len(crit_machines)} machines at risk):**\n")
+            for m in crit_machines:
+                status_icon = "🔴" if m.get("health_status") == "Critical" else "🟠"
+                lines.append(
+                    f"• {status_icon} **{m.get('machine_name')}** (`{m.get('machine_code')}` in *{m.get('department')}*)\n"
+                    f"   - **Health Score**: **{m.get('health_score') or 0}/100** ({m.get('health_status')})\n"
+                    f"   - **Status**: {m.get('operating_status', 'Operational')} | **Days Since Maintenance**: {m.get('days_since_maintenance') or 'Unknown'}\n"
+                )
+            lines.append("\n🛠️ **Recommended Action Plan:**\n1. Prioritize immediate diagnostic sensor readings on critical equipment.\n2. Schedule preventive lubrication and alignment checks to prevent unplanned line shutdowns.\n3. Cross-reference telemetry with related Production output KPIs.")
+        else:
+            lines.append("✅ **All Equipment Operating Within Normal Parameters**\n\nEvery monitored machine in the fleet is operating at Good or Healthy condition. Continue standard weekly calibration intervals.")
+
+        return "\n".join(lines)
+
+    # 4. Operational Output / Improvement Queries
+    if any(k in q_lower for k in ["improve", "output", "operational output", "efficiency", "better", "recommend", "optimize", "action plan"]):
+        crit_list = [k for k in crit_kpis if k.get("status") == "Critical"]
+        pending_depts = [m for m in missing_list if m.get("missing_entries", 0) > 0]
 
         lines = [
-            f"Here are the **critical and warning metric deviations** requiring attention:\n",
+            f"**Operational Output & Performance Action Plan — {company_name}**\n",
+            f"Company Health Index is currently at **{company_score if company_score is not None else '--'}%**.\n",
+            "Here are the **top priority operational actions** to improve output:\n",
+        ]
+
+        # Action 1: Address Critical Bottlenecks
+        if crit_list:
+            top_crit = crit_list[0]
+            lines.append(f"1. **Remediate Critical KPI Bottleneck**\n   • Focus on **{top_crit.get('kpi_name')}** in **{top_crit.get('department')}** (Actual: **{top_crit.get('actual_value')}** vs Target: **{top_crit.get('target_value')} {top_crit.get('unit', '')}**, {round(float(top_crit.get('achievement_percentage') or 0), 1)}% achieved).\n")
+        else:
+            lines.append("1. **Maintain Target Throughput**\n   • Key production and quality metrics are within standard operating bands; sustain current cycle times.\n")
+
+        # Action 2: Eliminate Data Blindspots
+        if pending_depts:
+            top_pending = pending_depts[0]
+            lines.append(f"2. **Close Data Blindspots & Complete Pending Submissions**\n   • Ensure timely reporting from **{top_pending.get('department')}** ({top_pending.get('missing_entries')} metrics pending) to maintain real-time visibility.\n")
+        else:
+            lines.append("2. **Real-time Monitoring**\n   • Data completeness is 100%; verify telemetry signals and operational logs daily.\n")
+
+        # Action 3: Department Score Alignment
+        lowest_depts = sorted([d for d in depts_perf if d.get("score") is not None], key=lambda x: x.get("score", 0))
+        if lowest_depts:
+            low_d = lowest_depts[0]
+            lines.append(f"3. **Targeted Department Support**\n   • Support **{low_d.get('department')}** (current score: **{low_d.get('score')}%**) with dedicated resource allocation and equipment checks.\n")
+        else:
+            lines.append("3. **Cross-Departmental Synchronization**\n   • Review handoff delays between Supply Chain, Production, and Quality Control.\n")
+
+        lines.append("4. **Preventive Machine & Line Maintenance**\n   • Execute scheduled calibration and maintenance cycles to reduce unplanned line stops.\n")
+
+        return "\n".join(lines)
+
+    # 5. Critical KPIs Queries
+    if any(k in q_lower for k in ["critical", "warning", "below target", "fail", "bad", "worst"]):
+        if not crit_kpis:
+            return "✅ **No Critical KPI Deviations**\n\nAll operational KPIs with logged entries are currently performing within target thresholds."
+
+        lines = [
+            f"**Critical and Warning Metric Deviations — {company_name}**\n",
         ]
         for k in crit_kpis[:6]:
             status_icon = "🔴" if k.get("status") == "Critical" else "🟡"
@@ -220,7 +282,7 @@ def generate_local_diagnostic(specialist_type, question, context_data):
             )
         return "\n".join(lines)
 
-    # 4. Department Performance / Bottlenecks
+    # 6. Department Performance / Bottlenecks
     if any(k in q_lower for k in ["department", "lowest", "rank", "score", "bottleneck", "perform"]):
         if not depts_perf:
             return f"**{company_name}** has operational departments configured. Overall Health Index: **{company_score if company_score is not None else '--'}%**."
@@ -230,21 +292,22 @@ def generate_local_diagnostic(specialist_type, question, context_data):
             key=lambda x: (x.get("score") is None, x.get("score") or 0)
         )
         lines = [
-            f"Here is the current **Department Performance Ranking** (Company Health: **{company_score if company_score is not None else '--'}%**):\n",
+            f"**Department Performance Ranking — {company_name}** (Health Index: **{company_score if company_score is not None else '--'}%**):\n",
         ]
         for d in sorted_depts:
             s_val = f"**{d.get('score')}%**" if d.get("score") is not None else "*No Data Logged*"
-            lines.append(f"• **{d.get('department')}**: Health Score {s_val} (On Track: {d.get('on_track', 0)}, Warning: {d.get('warning', 0)}, Critical: {d.get('critical', 0)}, Missing: {d.get('missing', 0)})\n")
+            lines.append(f"• **{d.get('department')}**: Health Score {s_val} — On Track: **{d.get('on_track', 0)}**, Warning: **{d.get('warning', 0)}**, Critical: **{d.get('critical', 0)}**, Missing: **{d.get('missing', 0)}**\n")
 
         return "\n".join(lines)
 
-    # 5. Default General Summary
+    # 6. Default General Summary
+    pending_count = sum(1 for m in missing_list if m.get('missing_entries', 0) > 0)
     lines = [
-        f"Here is a quick operational overview for **{company_name}**:\n",
+        f"**Operational Summary — {company_name}**\n",
         f"• **Company Health Index**: **{company_score if company_score is not None else '--'}%**\n",
         f"• **Active Departments**: **{len(depts_perf)}**\n",
         f"• **Active Alerts**: **{len(alerts)}**\n",
-        f"• **Departments with Pending Submissions**: **{sum(1 for m in missing_list if m.get('missing_entries', 0) > 0)}**\n",
+        f"• **Departments with Pending Submissions**: **{pending_count}**\n",
         "What specific metric or department would you like to explore?"
     ]
     return "\n".join(lines)
@@ -297,6 +360,23 @@ def format_context_for_prompt(context_data, filters=None):
         for a in alerts[:6]:
             lines.append(f" - [{a.get('severity')}] {a.get('alert_type')} ({a.get('department')}): {a.get('message')}")
 
+    # Machine Health Fleet Overview
+    ms = context_data.get("machines_summary")
+    if ms and ms.get("total", 0) > 0:
+        lines.append(
+            f"\nMachine Health Fleet Overview ({ms['total']} Active Machines): "
+            f"Healthy={ms['healthy']}, Good={ms['good']}, Warning={ms['warning']}, Critical={ms['critical']}"
+        )
+        crit_machines = ms.get("critical_machines", [])
+        if crit_machines:
+            lines.append("Critical / Warning Equipment:")
+            for m in crit_machines[:8]:
+                lines.append(
+                    f" - [{m.get('health_status')}] {m.get('machine_name')} ({m.get('machine_code')}, {m.get('department')}): "
+                    f"Health Score={m.get('health_score')}/100, Operating={m.get('operating_status')}, "
+                    f"Days Since Maint={m.get('days_since_maintenance') or 'N/A'}"
+                )
+
     return "\n".join(lines)
 
 
@@ -313,24 +393,26 @@ def build_context_data(department=None, business_unit=None, customer=None,
     context["company_growth"] = company_perf.get("growth")
     context["departments_performance"] = company_perf.get("departments", [])
 
-    # Missing data summary derived directly from active departments and KPI definitions
+    # Live missing data summary derived from active period monitoring
     try:
-        departments = frappe.db.get_all("KPI Department", filters={"is_active": 1}, fields=["name", "department_name"])
+        from productix.kpi_tracking.api.data_entry import _get_data_entry_monitoring_internal
+        monitoring = _get_data_entry_monitoring_internal()
         missing_summary = []
-        for d in departments:
-            total_kpis = frappe.db.count("KPI Definition", {"department": d.name, "is_active": 1})
-            entries_count = frappe.db.count("KPI Data Entry", {"department": d.name, "docstatus": 1})
-            missing_count = max(0, total_kpis - entries_count)
-            employees = frappe.db.get_all("KPI User Assignment", filters={"department": d.name, "is_active": 1}, pluck="user")
+        for d in monitoring.get("departments", []):
             missing_summary.append({
-                "department": d.department_name,
-                "required_entries": total_kpis,
-                "completed_entries": min(entries_count, total_kpis),
-                "missing_entries": missing_count,
-                "assigned_employees": employees,
+                "department": d["department"],
+                "department_code": d["department_code"],
+                "required_entries": d["required_entries"],
+                "completed_entries": d["completed_entries"],
+                "missing_entries": d["missing_entries"],
+                "completion_percentage": d["completion_percentage"],
+                "assigned_employees": d.get("assigned_employees", []),
+                "period": d.get("period", ""),
+                "frequency": d.get("frequency", "Monthly"),
             })
         context["missing_data_summary"] = missing_summary
-    except Exception:
+    except Exception as e:
+        frappe.log_error(f"Error building AI missing data context: {str(e)}", "KPI AI Context")
         context["missing_data_summary"] = []
 
     # Critical & Warning KPIs
@@ -372,6 +454,40 @@ def build_context_data(department=None, business_unit=None, customer=None,
     )
     context["active_alerts"] = alerts
 
+    # Live Machine Health Summary
+    try:
+        if frappe.db.table_exists("Machine"):
+            m_filters = {"is_active": 1}
+            if department:
+                m_filters["department"] = department
+            machines = frappe.db.get_all(
+                "Machine",
+                filters=m_filters,
+                fields=[
+                    "name", "machine_name", "machine_code", "machine_type",
+                    "department", "operating_status", "health_score", "health_status",
+                    "last_reading_date", "days_since_maintenance", "location",
+                ],
+                order_by="health_score asc",
+            )
+            total_m = len(machines)
+            healthy_m = sum(1 for m in machines if m.get("health_status") == "Healthy")
+            good_m = sum(1 for m in machines if m.get("health_status") == "Good")
+            warning_m = sum(1 for m in machines if m.get("health_status") == "Warning")
+            critical_m = sum(1 for m in machines if m.get("health_status") == "Critical")
+            context["machines_summary"] = {
+                "total": total_m,
+                "healthy": healthy_m,
+                "good": good_m,
+                "warning": warning_m,
+                "critical": critical_m,
+                "machines": machines,
+                "critical_machines": [m for m in machines if m.get("health_status") in ("Critical", "Warning")],
+            }
+    except Exception as e:
+        frappe.log_error(f"Error building AI machine context: {str(e)}", "KPI AI Context")
+        context["machines_summary"] = {"total": 0, "healthy": 0, "good": 0, "warning": 0, "critical": 0, "machines": []}
+
     return context
 
 
@@ -380,7 +496,7 @@ def get_suggested_questions(specialist_type, department=None):
         "productivity": [
             "Which departments have missing data entries?",
             "Which KPIs are currently critical or below target?",
-            "Which department is performing lowest right now?",
+            "What is the current health status of our machines?",
             "How can we improve overall operational output?",
         ],
         "energy": [
@@ -394,6 +510,7 @@ def get_suggested_questions(specialist_type, department=None):
             "What is the safety compliance status across departments?",
         ],
         "process": [
+            "What is the health score of our machines and equipment?",
             "Which quality or defect rate KPIs are in warning status?",
             "What is the root cause of recent performance variances?",
             "How do we improve first-pass yield to target?",

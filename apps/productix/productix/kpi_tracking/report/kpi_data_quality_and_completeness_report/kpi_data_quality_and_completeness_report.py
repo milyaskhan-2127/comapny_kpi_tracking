@@ -5,7 +5,7 @@ from productix.kpi_tracking.report.report_utils import (
     get_authorized_departments_for_report,
     get_status_badge,
 )
-from productix.kpi_tracking.api.data_entry import _get_period_for_frequency
+from productix.kpi_tracking.services.period_engine import get_current_period
 
 
 def execute(filters=None):
@@ -83,7 +83,7 @@ def get_data(filters):
         dept_code = kpi.department
         dept_display = dept_names.get(dept_code, dept_code)
         freq = kpi.frequency or "Daily"
-        target_period = period_filter or _get_period_for_frequency(freq, getdate(today()))
+        target_period = period_filter or get_current_period(freq, getdate(today()))
 
         # Check submitted entries for this KPI, dept, period
         entries = frappe.db.get_all(
@@ -136,7 +136,7 @@ def get_data(filters):
                 child_vals = frappe.db.get_all(
                     "KPI Data Entry Value",
                     filters={"parent": entry.name, "parenttype": "KPI Data Entry"},
-                    fields=["field_name", "value_number", "value_text"]
+                    fields=["field_name", "value"]
                 )
                 submitted_field_names = {cv.field_name: cv for cv in child_vals}
 
@@ -144,20 +144,17 @@ def get_data(filters):
                 for req_inp in kpi_req_inputs:
                     fname = req_inp.field_name
                     cv = submitted_field_names.get(fname)
-                    if not cv or (cv.value_number is None and not cv.value_text):
+                    if not cv or cv.value is None:
                         incomplete_count += 1
                         diagnosis_notes.append(f"Missing required field '{req_inp.label or fname}'.")
                     else:
-                        if cv.value_number is not None:
-                            val_num = flt(cv.value_number)
-                            if req_inp.minimum_value is not None and val_num < flt(req_inp.minimum_value):
-                                invalid_count += 1
-                                diagnosis_notes.append(f"Field '{req_inp.label}' below minimum allowed ({req_inp.minimum_value}).")
-                            elif req_inp.maximum_value is not None and val_num > flt(req_inp.maximum_value):
-                                invalid_count += 1
-                                diagnosis_notes.append(f"Field '{req_inp.label}' exceeds maximum allowed ({req_inp.maximum_value}).")
-                            else:
-                                valid_input_count += 1
+                        val_num = flt(cv.value)
+                        if req_inp.minimum_value is not None and val_num < flt(req_inp.minimum_value):
+                            invalid_count += 1
+                            diagnosis_notes.append(f"Field '{req_inp.label or fname}' below minimum allowed ({req_inp.minimum_value}).")
+                        elif req_inp.maximum_value is not None and val_num > flt(req_inp.maximum_value):
+                            invalid_count += 1
+                            diagnosis_notes.append(f"Field '{req_inp.label or fname}' exceeds maximum allowed ({req_inp.maximum_value}).")
                         else:
                             valid_input_count += 1
 
