@@ -118,6 +118,12 @@ def module_key_for_module_name(module_name):
     return None
 
 
+def app_for_module_key(module_key):
+    """Return the app name that owns the given module_key, or None."""
+    info = get_module_info(module_key)
+    return info.get("app") if info else None
+
+
 def platform_module_keys():
     """Module keys whose manifest is flagged ``always_enabled`` (the platform).
 

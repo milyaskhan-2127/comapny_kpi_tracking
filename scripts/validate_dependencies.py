@@ -48,13 +48,11 @@ except ImportError:  # imported as scripts.validate_dependencies (bench root on 
         parse_hooks,
     )
 
-# Sanctioned cross-app calls (intentional, documented).
-# core's AI Agent Log list view renders a "Run Scan" button that invokes the
-# recipe app's trigger_manual_scan — but ONLY when recipe is enabled, so the
-# coupling is to the module registry, never to a hard-coded install.
-ALLOWED_CROSS_CALLS = {
-    ("productix_core", "productix_recipe.api.inventory.trigger_manual_scan"),
-}
+# No sanctioned cross-app calls.
+# Core uses the generic extension dispatcher (productix_core.api.extensions.trigger_module_action)
+# to invoke module-specific actions. Business modules implement actions under
+# {app}.api.actions.{action_name}. There is no hard-coded Core -> Recipe coupling.
+ALLOWED_CROSS_CALLS = set()
 
 # Legacy dotted reference inside a STRING token, e.g. "productix.recipe_management.x".
 # The lookbehind excludes `productix_core.migrations.productix.…` (preceded by '.')
