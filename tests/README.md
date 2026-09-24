@@ -164,6 +164,17 @@ Post-retirement harness (all retained under `tests/`):
   `_verify_assets.py`, `_local_data_snapshot.py`/`_local_diff.py`,
   `_site_status.py` — migration, web, asset, zero-data-loss and site-state
   evidence runners (ACCEPTANCE_EVIDENCE §1–§13).
+- `_ws_counts.py` / `_ws_dump.py` / `_recipe_ws_analyze.py` /
+  `_ws_diff_detail.py` / `_ws_schema_diag.py` — workspace structure and
+  content evidence: counts, canonical full-doc SHA dumps, fixture-vs-live
+  analysis and normalized diffs (drop system keys + generated child names).
+- `_fix_recipe_ws.py` — idempotent one-shot reconciliation that rewrites the
+  Recipe module-dir workspace JSON from `fixtures/workspace.json` (the
+  fixture-vs-module divergence resolution, §14).
+- `_smtp_acct_check.py` / `_site_legacy_diag.py` / `_clear_cache.sh`(+`.py`)
+  — SMTP credential-footprint and legacy-reference diagnostics; a stale
+  site-scoped `app_modules` cache (module-duplication warnings) is cleared
+  with `bash tests/_clear_cache.sh <site>`.
 
 Note: `/assets/*` must be probed through **nginx (:8080)**, not gunicorn —
 gunicorn does not serve symlinked public assets (framework behavior, identical

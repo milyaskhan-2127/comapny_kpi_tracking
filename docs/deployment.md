@@ -117,10 +117,51 @@ See `.env.example` (committed reference; `.env` is git-ignored):
 - `GROQ_API_KEY` — KPI AI assistant (or site config `groq_api_key`).
 - `SITE_NAME`, `ADMIN_PASSWORD`, `MARIADB_ROOT_PASSWORD`, `PRODUCTIX_APPS`.
 
-## 7. git-secret hygiene
+## 7. git-secret hygiene & required pre-push history cleanup
 
-Secrets were removed from the working tree (SMTP password now env-only). The
-old secret **still exists in git history** — before this repository is ever
-pushed, rewrite history (`git filter-repo` / BFG) or rotate the SMTP
-password. Never commit `*.sql` dumps, `.env`, `sites/`, or `logs/`
-(all git-ignored).
+**Working tree:** secrets were removed from tracked files long ago — SMTP
+is env-only (`.env`, git-ignored; `.env.example` carries a commented
+placeholder only). No dumps/customer data are tracked (`*.sql`, `*.gz`,
+`sites/`, `.env`, `logs/` are all git-ignored).
+
+**⚠️ Git history still contains one OLD SMTP password string** — a single
+18-character value at `.env.example` line 13 of the first three commits
+(`10d6e36`, `8413a0a`, `456bcd7`; sanitized from `fd6acb7` on). Its scope
+is verified exhaustively (ACCEPTANCE_EVIDENCE §14): every file of every
+commit, the current tracked tree, the running containers' env, and every
+site's `tabEmail Account` rows were searched with the exact fixed string —
+the only hit is those three `.env.example` blobs. The live `.env` carries
+a *different*, current credential, and the one decryptable Email Account
+row (site `productix.local`) holds that different value, not the exposed
+one.
+
+**Nothing has ever been pushed.** Complete BOTH steps, in this order,
+before the first push:
+
+1. **Rotate the old credential (operator action — do this now):** revoke
+   the old password for `support@techohub.net` at `mail.techohub.net`.
+   Nothing in the running stack uses it, so rotation cannot break the
+   system; after rotation the historical string is dead even while it
+   still exists in history.
+
+2. **Scrub history (before the first push):** run on a fresh clone (or
+   with `--force` if re-running):
+
+   ```bash
+   # build the replacement patterns file without echoing the secret into docs:
+   git show 456bcd7:.env.example \
+     | sed -n 's/^MAIL_PASSWORD=//p' \
+     | awk '{print $0 "==>REMOVED"}' > secret-patterns.txt
+   git filter-repo --replace-text secret-patterns.txt
+   rm secret-patterns.txt
+   git push --all --force   # first push; all hashes after 456bcd7 change,
+   git push --tags --force  # re-created tag pre-legacy-retirement included
+   ```
+
+   (BFG equivalent: `bfg --replace-text expressions.txt`.) Everyone with
+   an older clone must re-clone after the rewrite. Verify the scrub with a
+   fixed-string sweep: `git grep -F -f secret-patterns.txt $(git rev-list
+   --all)` must return nothing — and re-check `.env.example` history shows
+   only the commented placeholder.
+
+Never commit `*.sql` dumps, `.env`, `sites/`, or `logs/` (all git-ignored).
