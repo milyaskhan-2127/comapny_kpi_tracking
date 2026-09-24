@@ -1,9 +1,10 @@
 # Rollback
 
-Git is the rollback safety net. The legacy monolithic `productix` app is
-committed as a clean baseline on `main` (`456bcd7`); all modular app work is
-uncommitted/untracked on top. The repository is **never pushed**, so every
-state is recoverable locally.
+Git is the rollback safety net. The legacy monolithic `productix` app was
+committed as a clean baseline on `main` (`456bcd7`) and later **retired** —
+the last state that still contains it is tag `pre-legacy-retirement`
+(commit `fd6acb7`, the pre-removal audit checkpoint). The repository is
+**never pushed**, so every state is recoverable locally.
 
 ## 1. Before you start migrating
 
@@ -48,9 +49,13 @@ To reverse:
 
 ## 5. Rollback after retiring the old app
 
-The old app code remains in the repo at `apps/productix` (baseline commit).
-To go back to the monolith:
+The old app code is **no longer in the working tree** — it is preserved by
+git tag `pre-legacy-retirement` (commit `fd6acb7`, the audited pre-removal
+state). To go back to the monolith:
 
+0. `git checkout pre-legacy-retirement` (restores `apps/productix/` and the
+   legacy compose/deploy references), restore the compose mounts/PYTHONPATH,
+   and recreate the containers.
 1. Re-add `productix` to `apps.txt` / `apps.json`.
 2. `bench --site <site> install-app productix --force` (tables already exist).
 3. Manually flip any Module Def rows the ownership patch re-pointed back to

@@ -54,11 +54,19 @@ doc_events = {  # only for doctypes THIS app owns
 
 fixtures = []  # fixture dt lists for export-fixtures
 
-after_install = "productix_<name>.install.after_install"
-after_uninstall = "productix_<name>.install.after_uninstall"
+after_install = ["productix_<name>.install.after_install"]
+after_uninstall = ["productix_<name>.install.after_uninstall"]
 
 boot_session = "productix_<name>.utils.boot.boot_session"  # optional
 ```
+
+> **Critical:** an `install.py` alone does nothing — Frappe only runs it
+> because `hooks.py` *declares* `after_install`/`after_uninstall`. Without
+> those two lines the app installs but never provisions its entitlement row,
+> never invalidates the registry cache, and `set_entitlement` rejects the new
+> module key with HTTP 417 ("not installed on this site"). This exact failure
+> and its fix were exercised in the 2026-09-24 future-module E2E
+> (`tests/ACCEPTANCE_EVIDENCE.md` §13).
 
 ## install.py (exactly like the others)
 
@@ -68,9 +76,14 @@ def after_install():
     core_provision()
 
 def after_uninstall():
-    from productix_core.modules.registry import invalidate_registry_cache
-    invalidate_registry_cache()
+    from productix_core.install import after_uninstall as core_cleanup
+    core_cleanup()
 ```
+
+`core_provision()` invalidates the registry/entitlement caches, ensures
+Productix Settings exists, and re-syncs entitlement rows for **every**
+registry key (so the new module's row is seeded). `core_cleanup()` drops the
+caches again and prunes the ghost entitlement row on uninstall.
 
 ## productix_module.json
 
@@ -105,9 +118,18 @@ Do **not** set `always_enabled` (only the platform may).
       manifest, `apps/<app>/setup.py`).
 - [ ] **No source edits required** in `setup_site.sh/.ps1` or
       `deploy.sh/.ps1` — they discover apps from manifests (platform first).
+- [ ] `hooks.py` declares `after_install` / `after_uninstall` as **lists**
+      (install.py alone never runs — see the warning above).
 - [ ] Deployment wiring (documented, enumerated by design) does need the new
       app added: `docker-compose.yml` (backend PYTHONPATH + backend/frontend
-      `./apps/<app>` mounts + configurator asset symlink if applicable) and
-      `apps.json`.
+      `./apps/<app>` mounts) and bench availability — `bench get-app`
+      appends the app to `sites/apps.txt`, which `bench install-app`
+      requires (manual append for local compose-only dev).
 - [ ] `tests/README.md` matrix, `docs/versioning.md` compat row updated.
 - [ ] Fresh-install + subset combo acceptance (see `tests/README.md`).
+
+> **Proven end-to-end 2026-09-24:** a scaffolded `productix_manufacturing`
+> followed this template on `productix-c.local` — validators discovered it
+> with zero tool edits (5-app registry), install seeded the entitlement row,
+> the generic gate 403'd its module key while disabled, and uninstall
+> restored the exact 4-module state (evidence §13).

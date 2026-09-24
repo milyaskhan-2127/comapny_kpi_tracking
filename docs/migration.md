@@ -106,8 +106,13 @@ logs show no `productix.*` module import errors.
 - Old monolithic API paths (`productix.api.*`, `productix.kpi_tracking.api.*`)
   are **not** served by the new apps after retirement. Update callers to the
   app-scoped paths (`productix_recipe.*`, `productix_kpi.*`, …).
-- Keep `apps/productix` on the bench (mounted, PYTHONPATH) until retirement —
-  the compose file already does this for the migration window.
+- ~~Keep `apps/productix` on the bench (mounted, PYTHONPATH) until retirement~~
+  — **retirement complete** (2026-09-24): the directory, its compose
+  `PYTHONPATH`/mount entries and the deploy-script asset references were
+  removed after the migration evidence was recorded (tag
+  `pre-legacy-retirement`). Sites no longer carry legacy rows (`module_def_by_app`
+  shows no `productix` key; `retired_modules` is empty once the legacy
+  `modules.txt` leaves the bench).
 
 ## 8. Evidence
 

@@ -9,10 +9,14 @@ from pathlib import Path
 
 print("== legacy public tree ==")
 pub = Path("/home/frappe/frappe-bench/apps/productix/productix/public")
-for p in sorted(pub.rglob("*")):
-    rel = p.relative_to(pub)
-    kind = "DIR " if p.is_dir() else f"{p.stat().st_size:>7}B"
-    print(f"  {kind} {rel}")
+if not pub.exists():
+    print("  RETIRED: apps/productix removed (tag pre-legacy-retirement); "
+          "no legacy assets to probe")
+else:
+    for p in sorted(pub.rglob("*")):
+        rel = p.relative_to(pub)
+        kind = "DIR " if p.is_dir() else f"{p.stat().st_size:>7}B"
+        print(f"  {kind} {rel}")
 
 print("\n== sites/assets symlinks ==")
 for p in sorted(Path("/home/frappe/frappe-bench/sites/assets").iterdir()):
@@ -25,20 +29,25 @@ try:
 except Exception as e:
     print(f"  read fail: {e}")
 
-print("\n== HTTP probes (site productix-c.local via gunicorn :8000) ==")
+print("\n== HTTP probes ==")
+# /assets/* must be probed through nginx (frontend:8080): gunicorn does not
+# serve symlinked public assets (tests/README.md §5). doctype_js hook targets
+# are served public-stripped: <app>/public/js/custom_scripts/<file> ->
+# /assets/<app>/js/custom_scripts/<file> (the module-tree doctype js paths
+# return 404 for every app, including erpnext — framework characteristic).
+# /app/* stays on gunicorn :8000 with an explicit site header (site-scoped).
 urls = [
-    "/assets/productix_recipe/css/productix.css",
-    "/assets/productix_kpi/kpi_tracking/doctype/kpi_definition/kpi_definition.js",
-    "/assets/productix_instruction/instruction_room/doctype/instruction_message/instruction_message.js",
-    "/assets/productix_recipe/recipe_management/doctype/recipe/recipe.js",
-    "/assets/productix_core/js/productix_core.js",
-    "/app/productix-recipe",
-    "/app/kpi-tracking",
-    "/app/instruction-room",
+    ("http://frontend:8080", "/assets/productix_recipe/css/productix.css"),
+    ("http://frontend:8080", "/assets/productix_core/js/productix_core.js"),
+    ("http://frontend:8080", "/assets/productix_kpi/js/custom_scripts/kpi_user_scripts.js"),
+    ("http://frontend:8080", "/assets/productix_recipe/js/custom_scripts/recipe_doctype_scripts.js"),
+    ("http://localhost:8000", "/app/productix-recipe"),
+    ("http://localhost:8000", "/app/kpi-tracking"),
+    ("http://localhost:8000", "/app/instruction-room"),
 ]
-for u in urls:
+for base, u in urls:
     req = urllib.request.Request(
-        "http://localhost:8000" + u,
+        base + u,
         headers={"X-Frappe-Site-Name": "productix-c.local"},
         method="GET",
     )

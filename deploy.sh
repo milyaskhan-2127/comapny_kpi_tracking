@@ -7,8 +7,7 @@ SITE_NAME="${SITE_NAME:-productix.local}"
 
 # Same module selection semantics as setup_site.sh: PRODUCTIX_APPS override,
 # otherwise every app discovered via its productix_module.json manifest.
-# Platform first (manifest flagged "always_enabled"); legacy apps/productix
-# ships no manifest and is never picked up.
+# Platform first (manifest flagged "always_enabled").
 PLATFORM_APP=""
 DISCOVERED_APPS=()
 for manifest in apps/productix_*/productix_*/productix_module.json; do

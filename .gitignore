@@ -21,6 +21,11 @@ build/
 .env.local
 .env.production
 
+# Test / migration run artifacts
+*.log
+*.gz
+*.sql.gz
+
 # Node / Frontend
 node_modules/
 

@@ -87,6 +87,16 @@ env/bin/python -m pytest tests/test_registry_consistency.py -q   # registry/enti
 env/bin/python -m pytest tests/test_generic_discovery.py -q      # manifest-discovery rules (pure + frappe-gated)
 ```
 
+> **One-shot runner:** `bash tests/_battery_static.sh` (in the backend
+> container) executes both validators, `compileall`, the two pytest modules,
+> the legacy-coverage audit and the asset probe, printing `*_EXIT=n` for
+> each. `pytest` is a test-only dependency installed ephemerally into the
+> container env — a `docker compose up -d` recreate wipes it (the battery
+> re-installs it automatically). `tests/conftest.py` also creates `~/logs`,
+> the HOME-based logger fallback frappe opens at import time on a fresh
+> container (without it, pytest dies with
+> `INTERNALERROR: FileNotFoundError: /home/frappe/logs/database.log`).
+
 `tests/test_generic_discovery.py` builds synthetic app trees in a temp dir and
 asserts: pass case, future-module discovery without Core edits, and every
 negative (duplicate `module_key`, unknown requires, missing manifest,
@@ -129,6 +139,31 @@ Get-Content scripts/backup_retirement.sh -Raw | docker compose exec -T -u root m
 docker cp tests/_asset_probe.py <backend-id>:/tmp/
 docker compose exec -T backend env/bin/python /tmp/asset_probe.py
 ```
+
+**After retirement** the code-level audit self-reports instead of failing
+(the pre-removal 30/30 run is frozen in `ACCEPTANCE_EVIDENCE.md` §11; tag
+`pre-legacy-retirement` keeps the audited tree retrievable):
+
+    LEGACY_COVERAGE_AUDIT: RETIRED (apps/productix absent)   # exit 0
+
+Post-retirement harness (all retained under `tests/`):
+
+- `_battery_static.sh` — static battery runner (validators, compileall,
+  pytest, audit, asset probe) with exit codes per stage.
+- `_field_perm_equivalence.py <siteA> <siteB>` — DocField/DocPerm
+  equivalence over the shipped doctype set (B-vs-C → `SHARED=35 MISMATCH=0`;
+  local-vs-C → `SHARED=43 MISMATCH=0`).
+- `_gate_403_combo_c.py` / `_gate_future_module.py` — per-site gate 403
+  evidence via gunicorn :8000 with an explicit site header. The host-facing
+  `gate_403.sh` can only exercise the nginx `SITE_NAME` site (nginx forces
+  the header) — see its own header note before using it on a non-default
+  site.
+- `_future_module_state.py` — registry/entitlement/Module Def snapshot for
+  a site (used by the future-module E2E).
+- `_migcheck_full.sh`, `_web_smoke_local.py`, `_web_smoke_mig.py`,
+  `_verify_assets.py`, `_local_data_snapshot.py`/`_local_diff.py`,
+  `_site_status.py` — migration, web, asset, zero-data-loss and site-state
+  evidence runners (ACCEPTANCE_EVIDENCE §1–§13).
 
 Note: `/assets/*` must be probed through **nginx (:8080)**, not gunicorn —
 gunicorn does not serve symlinked public assets (framework behavior, identical

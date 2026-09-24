@@ -7,7 +7,6 @@
 #   PRODUCTIX_APPS="productix_core,productix_recipe"   # install subset
 #   (default: every app discovered via its productix_module.json manifest;
 #    the platform app — manifest flagged "always_enabled" — is installed first)
-# The legacy apps/productix directory ships no manifest and is never picked up.
 
 set -e
 export MSYS_NO_PATHCONV=1

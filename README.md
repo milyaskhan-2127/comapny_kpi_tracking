@@ -218,8 +218,10 @@ Edit `.env` to configure your database passwords, admin credentials, and SMTP se
 > ```
 > `setup_site.sh` / `setup_site.ps1` read `PRODUCTIX_APPS` from the environment
 > or `.env` and install exactly that set (the platform app is auto-added if
-> missing). The legacy `apps/productix` directory ships no manifest and is
-> never picked up.
+> missing). Discovery is manifest-driven — any future `apps/productix_*`
+> directory shipping a `productix_module.json` is picked up with no script
+> edit (the legacy `apps/productix` tree shipped none and has since been
+> retired from the repo).
 
 ### 3. Start Multi-Container Stack
 ```bash

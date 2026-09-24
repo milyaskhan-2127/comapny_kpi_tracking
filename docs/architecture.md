@@ -13,12 +13,15 @@ Frappe/ERPNext v15 apps:
 | `productix_kpi`       | `KPI Tracking`                                   | `apps/productix_kpi` |
 | `productix_instruction`| `Instruction Room`                              | `apps/productix_instruction` |
 
-The legacy monolith is preserved at `apps/productix` — **untouched as a
-baseline** (commit `456bcd7`) — and is only used for the migration path
-(documented in `migration.md`) and the still-live legacy site
-(`productix.local`). It ships **no** `productix_module.json`, so it is
-naturally excluded from the module registry. All new-work code lives in the
-four apps.
+The legacy monolith was **retired** on 2026-09-24 after the 13-point coverage
+audit (41/41 doctypes, APIs, hooks, fixtures, assets — see
+`tests/ACCEPTANCE_EVIDENCE.md` §11): the `apps/productix` directory, its
+compose `PYTHONPATH`/mount entries and all deploy-script references are gone
+from the working tree. The full pre-retirement tree is preserved by git tag
+`pre-legacy-retirement` (commit `fd6acb7`), which is the rollback point for
+`docs/rollback.md` §5. All current code lives in the four apps; the retired
+tree ships no `productix_module.json`, so it was never part of the module
+registry.
 
 ## 2. Dependency rules
 

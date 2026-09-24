@@ -19,6 +19,10 @@ def pytest_configure(config):
     site = os.environ.get("PRODUCTIX_TEST_SITE")
     if not site:
         return
+    # HOME-based logger fallback (~/logs) is not part of the image or any
+    # volume — a fresh container lacks it and frappe's import-time logging
+    # then raises FileNotFoundError (INTERNALERROR). Create it first.
+    os.makedirs(os.path.join(os.path.expanduser("~"), "logs"), exist_ok=True)
     try:
         import frappe
         from frappe.utils import get_bench_path
@@ -27,13 +31,13 @@ def pytest_configure(config):
     if not getattr(frappe.local, "site", None):
         bench_path = get_bench_path()
         sites_path = os.path.join(bench_path, "sites")
-        frappe.init(site=site, sites_path=sites_path)
         # raw `env/bin/python -m pytest` (outside the bench CLI) lacks the
-        # log dirs frappe's RotatingFileHandler requires
+        # log dirs frappe's RotatingFileHandler requires.
         for log_dir in (
             os.path.join(bench_path, site, "logs"),
             os.path.join(sites_path, site, "logs"),
         ):
             os.makedirs(log_dir, exist_ok=True)
+        frappe.init(site=site, sites_path=sites_path)
         frappe.connect()
         frappe.set_user("Administrator")

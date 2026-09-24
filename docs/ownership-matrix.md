@@ -10,6 +10,12 @@ Counts verified directly from the tree: **41/41 legacy doctypes mapped, 0
 missing, 0 retired with data**. All legacy APIs, hooks, and scheduled jobs are
 accounted for; the only deltas are intentional (see §7).
 
+> **Retirement status (2026-09-24):** the audited `apps/productix` tree has
+> been removed from the working tree (tag `pre-legacy-retirement` = commit
+> `fd6acb7` keeps it retrievable). This matrix remains the authoritative
+> component-by-component record of what the monolith contained and where each
+> piece now lives.
+
 Legend: `owner` = the app whose `modules.txt`/`productix_module.json` now owns
 the component; `module` = the Frappe Module Def the doctype declares.
 
