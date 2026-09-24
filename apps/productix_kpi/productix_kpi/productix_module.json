@@ -1,0 +1,9 @@
+{
+  "app": "productix_kpi",
+  "module_key": "kpi",
+  "module_name": "KPI Tracking",
+  "title": "KPI & Machine Health",
+  "description": "Department KPI tracking, formulas, data entry, company overview, CEO access, machine health monitoring, AI assistant, and backup/restore manager.",
+  "requires": ["erpnext", "productix_core"],
+  "version": "1.0.0"
+}

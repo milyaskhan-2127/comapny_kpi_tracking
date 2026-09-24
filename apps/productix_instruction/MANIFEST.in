@@ -1,0 +1,2 @@
+include MANIFEST.in
+recursive-include productix_instruction *.html *.js *.css *.json *.md *.txt *.svg *.png

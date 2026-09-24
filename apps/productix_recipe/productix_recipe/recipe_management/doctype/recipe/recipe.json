@@ -1,0 +1,225 @@
+{
+  "actions": [],
+  "allow_rename": 1,
+  "autoname": "field:recipe_name",
+  "creation": "2024-01-01 00:00:00",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "recipe_name",
+    "category",
+    "description",
+    "col_break1",
+    "serving_size",
+    "unit",
+    "section_bom",
+    "items",
+    "section_extras",
+    "extras",
+    "section_cost",
+    "bom_cost",
+    "cost_per_serving",
+    "section_audit",
+    "created_by_name",
+    "modified_by_name"
+  ],
+  "fields": [
+    {
+      "bold": 1,
+      "fieldname": "recipe_name",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "Recipe Name",
+      "reqd": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "category",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "label": "Category",
+      "options": "\nBakery\nDesserts\nMain Course\nSides\nBeverages\nSnacks\nOther"
+    },
+    {
+      "fieldname": "description",
+      "fieldtype": "Text",
+      "label": "Description"
+    },
+    {
+      "fieldname": "col_break1",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "1.0",
+      "fieldname": "serving_size",
+      "fieldtype": "Float",
+      "label": "Serving Size",
+      "reqd": 1
+    },
+    {
+      "default": "Batch",
+      "fieldname": "unit",
+      "fieldtype": "Select",
+      "label": "Unit",
+      "options": "Batch\nTray\nUnit\nKg\nLitre\nPortion",
+      "reqd": 1
+    },
+    {
+      "fieldname": "section_bom",
+      "fieldtype": "Section Break",
+      "label": "Bill of Materials"
+    },
+    {
+      "fieldname": "items",
+      "fieldtype": "Table",
+      "label": "Ingredients",
+      "options": "Recipe Item"
+    },
+    {
+      "collapsible": 1,
+      "fieldname": "section_extras",
+      "fieldtype": "Section Break",
+      "label": "Recipe Extras"
+    },
+    {
+      "fieldname": "extras",
+      "fieldtype": "Table",
+      "label": "Extras / Toppings",
+      "options": "Recipe Extra"
+    },
+    {
+      "fieldname": "section_cost",
+      "fieldtype": "Section Break",
+      "label": "Costing"
+    },
+    {
+      "bold": 1,
+      "fieldname": "bom_cost",
+      "fieldtype": "Currency",
+      "in_list_view": 1,
+      "label": "BOM Cost",
+      "read_only": 1
+    },
+    {
+      "fieldname": "cost_per_serving",
+      "fieldtype": "Currency",
+      "label": "Cost Per Serving",
+      "read_only": 1
+    },
+    {
+      "collapsible": 1,
+      "fieldname": "section_audit",
+      "fieldtype": "Section Break",
+      "label": "User Audit History"
+    },
+    {
+      "fieldname": "created_by_name",
+      "fieldtype": "Data",
+      "label": "Created By",
+      "read_only": 1
+    },
+    {
+      "fieldname": "modified_by_name",
+      "fieldtype": "Data",
+      "label": "Last Modified By",
+      "read_only": 1
+    }
+  ],
+  "links": [],
+  "modified": "2024-01-01 00:00:00",
+  "modified_by": "Administrator",
+  "module": "Recipe Management",
+  "name": "Recipe",
+  "naming_rule": "By fieldname",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "export": 1,
+      "read": 1,
+      "report": 1,
+      "role": "Factory Admin",
+      "write": 1
+    },
+    {
+      "create": 1,
+      "delete": 1,
+      "export": 1,
+      "read": 1,
+      "report": 1,
+      "role": "Assistant System Administrator",
+      "write": 1
+    },
+    {
+      "create": 1,
+      "read": 1,
+      "report": 1,
+      "role": "Production Manager",
+      "write": 1
+    },
+    {
+      "read": 1,
+      "role": "Store Keeper"
+    },
+    {
+      "read": 1,
+      "role": "Purchase Manager"
+    },
+    {
+      "read": 1,
+      "role": "General Staff"
+    },
+    {
+      "create": 1,
+      "delete": 1,
+      "export": 1,
+      "read": 1,
+      "report": 1,
+      "role": "System Manager",
+      "write": 1
+    },
+    {
+      "create": 1,
+      "delete": 1,
+      "export": 1,
+      "read": 1,
+      "report": 1,
+      "role": "Productix Admin",
+      "write": 1
+    },
+    {
+      "create": 1,
+      "delete": 1,
+      "export": 1,
+      "read": 1,
+      "report": 1,
+      "role": "Productix Assistant Admin",
+      "write": 1
+    },
+    {
+      "create": 1,
+      "read": 1,
+      "report": 1,
+      "role": "Productix Production Manager",
+      "write": 1
+    },
+    {
+      "read": 1,
+      "role": "Productix Store Keeper"
+    },
+    {
+      "read": 1,
+      "role": "Productix Purchase Manager"
+    },
+    {
+      "read": 1,
+      "role": "Productix General User"
+    }
+  ],
+  "search_fields": "recipe_name,category",
+  "sort_field": "recipe_name",
+  "sort_order": "ASC",
+  "title_field": "recipe_name",
+  "track_changes": 1
+}

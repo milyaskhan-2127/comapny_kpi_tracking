@@ -1,0 +1,15 @@
+{
+  "name": "Machine KPI Link",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "istable": 1,
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": ["kpi", "kpi_name"],
+  "fields": [
+    {"fieldname": "kpi", "fieldtype": "Link", "label": "KPI", "options": "KPI Definition", "reqd": 1, "in_list_view": 1, "columns": 4},
+    {"fieldname": "kpi_name", "fieldtype": "Data", "label": "KPI Name", "fetch_from": "kpi.kpi_name", "read_only": 1, "in_list_view": 1, "columns": 4}
+  ],
+  "permissions": [],
+  "track_changes": 0
+}

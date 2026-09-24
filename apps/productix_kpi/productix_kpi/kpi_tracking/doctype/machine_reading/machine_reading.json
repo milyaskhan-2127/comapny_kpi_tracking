@@ -1,0 +1,50 @@
+{
+  "name": "Machine Reading",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "document_type": "Document",
+  "engine": "InnoDB",
+  "is_submittable": 1,
+  "naming_rule": "Expression",
+  "autoname": "MR-.YYYY.-.#####",
+  "field_order": [
+    "machine", "machine_name", "machine_type",
+    "column_break_1", "reading_date", "period", "entered_by",
+    "section_health", "health_score", "health_status", "data_quality",
+    "section_readings", "readings",
+    "section_notes", "notes", "amended_from"
+  ],
+  "fields": [
+    {"fieldname": "machine", "fieldtype": "Link", "label": "Machine", "options": "Machine", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "machine_name", "fieldtype": "Data", "label": "Machine Name", "fetch_from": "machine.machine_name", "read_only": 1, "in_list_view": 1},
+    {"fieldname": "machine_type", "fieldtype": "Data", "label": "Machine Type", "fetch_from": "machine.machine_type", "read_only": 1},
+    {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+    {"fieldname": "reading_date", "fieldtype": "Date", "label": "Reading Date", "reqd": 1, "default": "Today", "in_list_view": 1},
+    {"fieldname": "period", "fieldtype": "Data", "label": "Period", "read_only": 1},
+    {"fieldname": "entered_by", "fieldtype": "Link", "label": "Entered By", "options": "User", "read_only": 1},
+    {"fieldname": "section_health", "fieldtype": "Section Break", "label": "Health Assessment"},
+    {"fieldname": "health_score", "fieldtype": "Float", "label": "Health Score", "read_only": 1, "in_list_view": 1,
+     "description": "Calculated from readings vs thresholds (0-100)"},
+    {"fieldname": "health_status", "fieldtype": "Select", "label": "Health Status", "read_only": 1, "in_list_view": 1,
+     "options": "\nHealthy\nGood\nWarning\nCritical"},
+    {"fieldname": "data_quality", "fieldtype": "Select", "label": "Data Quality", "read_only": 1,
+     "options": "\nComplete\nPartial\nInsufficient",
+     "description": "Indicates how many required parameters were provided"},
+    {"fieldname": "section_readings", "fieldtype": "Section Break", "label": "Parameter Readings"},
+    {"fieldname": "readings", "fieldtype": "Table", "label": "Readings", "options": "Machine Reading Value", "reqd": 1},
+    {"fieldname": "section_notes", "fieldtype": "Section Break", "label": "Notes"},
+    {"fieldname": "notes", "fieldtype": "Small Text", "label": "Notes"},
+    {"fieldname": "amended_from", "fieldtype": "Link", "label": "Amended From", "options": "Machine Reading", "read_only": 1, "no_copy": 1}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1},
+    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1},
+    {"role": "KPI CEO", "read": 1},
+    {"role": "KPI Employee", "read": 1, "write": 1, "create": 1, "submit": 1}
+  ],
+  "sort_field": "reading_date",
+  "sort_order": "DESC",
+  "title_field": "machine_name",
+  "search_fields": "machine, machine_name, reading_date",
+  "track_changes": 1
+}

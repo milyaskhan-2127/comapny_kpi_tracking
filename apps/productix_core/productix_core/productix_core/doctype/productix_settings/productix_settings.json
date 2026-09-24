@@ -1,0 +1,22 @@
+{
+  "name": "Productix Settings",
+  "module": "Productix Core",
+  "doctype": "DocType",
+  "document_type": "Setup",
+  "engine": "InnoDB",
+  "issingle": 1,
+  "fields": [
+    {"fieldname": "section_license", "fieldtype": "Section Break", "label": "Licensing"},
+    {"fieldname": "enable_license_check", "fieldtype": "Check", "label": "Enforce License Checks", "default": "1"},
+    {"fieldname": "license_notice_days", "fieldtype": "Int", "label": "License Expiry Notice (Days)", "default": "7"},
+    {"fieldname": "section_module", "fieldtype": "Section Break", "label": "Module Entitlements"},
+    {"fieldname": "module_entitlements_help", "fieldtype": "HTML", "options": "<div class=\"text-muted\" style=\"margin-bottom:8px;\">Control which productix modules are available on this site. Disabled modules are blocked at the server level (API 403) and hidden from the UI. The Core platform module cannot be disabled.</div>"},
+    {"fieldname": "module_entitlements", "fieldtype": "Table", "label": "Installed Modules", "options": "Productix Module Entitlement"}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1}
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1
+}

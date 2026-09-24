@@ -1,0 +1,40 @@
+{
+  "name": "Machine Type Parameter",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "istable": 1,
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "parameter_name", "parameter_code", "parameter_category", "column_break_1",
+    "unit", "weight", "is_required",
+    "section_thresholds", "normal_min", "normal_max",
+    "column_break_t1", "warning_min", "warning_max",
+    "column_break_t2", "critical_min", "critical_max"
+  ],
+  "fields": [
+    {"fieldname": "parameter_name", "fieldtype": "Data", "label": "Parameter Name", "reqd": 1, "in_list_view": 1, "columns": 2},
+    {"fieldname": "parameter_code", "fieldtype": "Data", "label": "Parameter Code", "reqd": 1, "in_list_view": 1, "columns": 1},
+    {"fieldname": "parameter_category", "fieldtype": "Select", "label": "Category", "reqd": 1, "in_list_view": 1, "columns": 1,
+     "options": "Temperature\nVibration\nElectrical\nPressure\nFlow\nMechanical\nOperating\nMaintenance\nProduction\nOther"},
+    {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+    {"fieldname": "unit", "fieldtype": "Data", "label": "Unit", "in_list_view": 1, "columns": 1},
+    {"fieldname": "weight", "fieldtype": "Float", "label": "Weight", "default": "1.0", "in_list_view": 1, "columns": 1,
+     "description": "Importance weight for health score calculation"},
+    {"fieldname": "is_required", "fieldtype": "Check", "label": "Required", "default": "0",
+     "description": "If checked, readings must include this parameter"},
+    {"fieldname": "section_thresholds", "fieldtype": "Section Break", "label": "Thresholds"},
+    {"fieldname": "normal_min", "fieldtype": "Float", "label": "Normal Min"},
+    {"fieldname": "normal_max", "fieldtype": "Float", "label": "Normal Max"},
+    {"fieldname": "column_break_t1", "fieldtype": "Column Break"},
+    {"fieldname": "warning_min", "fieldtype": "Float", "label": "Warning Min"},
+    {"fieldname": "warning_max", "fieldtype": "Float", "label": "Warning Max"},
+    {"fieldname": "column_break_t2", "fieldtype": "Column Break"},
+    {"fieldname": "critical_min", "fieldtype": "Float", "label": "Critical Min"},
+    {"fieldname": "critical_max", "fieldtype": "Float", "label": "Critical Max"}
+  ],
+  "permissions": [],
+  "sort_field": "parameter_name",
+  "sort_order": "ASC",
+  "track_changes": 0
+}

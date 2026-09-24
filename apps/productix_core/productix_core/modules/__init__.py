@@ -1,0 +1,1 @@
+# Productix Core modules package — module registry and entitlement enforcement.

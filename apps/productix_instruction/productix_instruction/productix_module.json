@@ -1,0 +1,9 @@
+{
+  "app": "productix_instruction",
+  "module_key": "instruction",
+  "module_name": "Instruction Room",
+  "title": "Instruction Room",
+  "description": "In-app announcements (Instruction Message) with per-user read tracking (Message Notification).",
+  "requires": ["erpnext", "productix_core"],
+  "version": "1.0.0"
+}

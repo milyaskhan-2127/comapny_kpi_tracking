@@ -1,0 +1,2 @@
+# List of patches to run on migrate
+# Format: app.patches.patch_module.execute

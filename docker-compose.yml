@@ -1,3 +1,38 @@
+# ============================================================================
+# Productix ERP — Docker Compose (Frappe/ERPNext v15)
+#
+# Productix is modular. The four productix apps (core, recipe, kpi,
+# instruction) are always mounted so any combination can be installed on a
+# site. Which apps are INSTALLED on a given site is selected at setup time —
+# see setup_site.ps1 / setup_site.sh (PRODUCTIX_APPS), and the module
+# registry (productix_core) for runtime enable/disable.
+#
+# The legacy monolithic `productix` app stays mounted for the documented
+# migration path (existing DBs migrate first, then retire the old app).
+# ============================================================================
+
+x-python-apps: &python-apps
+  PYTHONPATH: /home/frappe/frappe-bench/apps/productix_core:/home/frappe/frappe-bench/apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_instruction:/home/frappe/frappe-bench/apps/productix
+
+x-productix-app-volumes: &productix-app-volumes
+  - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
+  - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
+  - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
+  - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
+  # legacy (migration only) — retire after migrating an existing database
+  - ./apps/productix:/home/frappe/frappe-bench/apps/productix
+
+x-backend-volumes: &backend-volumes
+  - sites:/home/frappe/frappe-bench/sites
+  - logs:/home/frappe/frappe-bench/logs
+  - assets:/home/frappe/frappe-bench/sites/assets
+  - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
+  - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
+  - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
+  - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
+  # legacy (migration only)
+  - ./apps/productix:/home/frappe/frappe-bench/apps/productix
+
 services:
   configurator:
     image: frappe/erpnext:v15.121.3
@@ -12,20 +47,31 @@ services:
         bench set-config -g redis_queue redis://redis-queue:6379;
         bench set-config -g redis_socketio redis://redis-queue:6379;
         bench set-config -gp socketio_port 9000;
-        bench set-config -g default_site productix.local;
+        bench set-config -g default_site ${SITE_NAME:-productix.local};
         bench set-config -g allow_cors "*";
-        ln -sfn /home/frappe/frappe-bench/apps/frappe/frappe/public /home/frappe/frappe-bench/sites/assets/frappe;
-        ln -sfn /home/frappe/frappe-bench/apps/erpnext/erpnext/public /home/frappe/frappe-bench/sites/assets/erpnext;
+        # frappe/erpnext assets must be REAL directories inside the shared
+        # "assets" volume so that (a) nginx serves bundles from the volume and
+        # (b) `bench build` output written under sites/assets is visible to the
+        # frontend container. If a previous configurator leaked a symlink,
+        # replace it with a real copy (idempotent: no-op when already a dir).
+        if [ -L /home/frappe/frappe-bench/sites/assets/frappe ]; then rm /home/frappe/frappe-bench/sites/assets/frappe && cp -a /home/frappe/frappe-bench/apps/frappe/frappe/public /home/frappe/frappe-bench/sites/assets/frappe; fi;
+        if [ -L /home/frappe/frappe-bench/sites/assets/erpnext ]; then rm /home/frappe/frappe-bench/sites/assets/erpnext && cp -a /home/frappe/frappe-bench/apps/erpnext/erpnext/public /home/frappe/frappe-bench/sites/assets/erpnext; fi;
+        # productix apps serve source assets through symlinks into the mounted
+        # app trees (frontend mounts the apps so these resolve).
+        ln -sfn /home/frappe/frappe-bench/apps/productix_core/productix_core/public /home/frappe/frappe-bench/sites/assets/productix_core;
+        ln -sfn /home/frappe/frappe-bench/apps/productix_recipe/productix_recipe/public /home/frappe/frappe-bench/sites/assets/productix_recipe;
+        ln -sfn /home/frappe/frappe-bench/apps/productix_kpi/productix_kpi/public /home/frappe/frappe-bench/sites/assets/productix_kpi;
+        ln -sfn /home/frappe/frappe-bench/apps/productix_instruction/productix_instruction/public /home/frappe/frappe-bench/sites/assets/productix_instruction;
         ln -sfn /home/frappe/frappe-bench/apps/productix/productix/public /home/frappe/frappe-bench/sites/assets/productix;
         ln -sfn /home/frappe/frappe-bench/apps/frappe/node_modules /home/frappe/frappe-bench/apps/frappe/frappe/public/node_modules;
         ln -sfn /home/frappe/frappe-bench/apps/erpnext/node_modules /home/frappe/frappe-bench/apps/erpnext/erpnext/public/node_modules;
-        python3 -c "import os, json, re; a, r = {}, {}; [a.update({f'{m.group(1)}.{m.group(3)}': f'/assets/{app}/dist/{sub}/{f}' for sub in ['js', 'css'] if os.path.exists(f'/home/frappe/frappe-bench/apps/{app}/{app}/public/dist/{sub}') for f in os.listdir(f'/home/frappe/frappe-bench/apps/{app}/{app}/public/dist/{sub}') if not f.endswith('.map') and (m := re.match(r'^(.+)\.([A-Z0-9]{8})\.(js|css)$$', f))}) for app in ['frappe', 'erpnext'] if os.path.exists(f'/home/frappe/frappe-bench/apps/{app}/{app}/public/dist')]; [r.update({f'rtl_{m.group(1)}.css': f'/assets/{app}/dist/css-rtl/{f}' for f in os.listdir(f'/home/frappe/frappe-bench/apps/{app}/{app}/public/dist/css-rtl') if not f.endswith('.map') and (m := re.match(r'^(.+)\.([A-Z0-9]{8})\.css$$', f))}) for app in ['frappe', 'erpnext'] if os.path.exists(f'/home/frappe/frappe-bench/apps/{app}/{app}/public/dist/css-rtl')]; json.dump(a, open('/home/frappe/frappe-bench/sites/assets/assets.json', 'w'), indent=2); json.dump(r, open('/home/frappe/frappe-bench/sites/assets/assets-rtl.json', 'w'), indent=2)";
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
       REDIS_CACHE: redis-cache:6379
       REDIS_QUEUE: redis-queue:6379
       SOCKETIO_PORT: "9000"
+      SITE_NAME: ${SITE_NAME:-productix.local}
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
@@ -42,17 +88,13 @@ services:
     image: frappe/erpnext:v15.121.3
     restart: unless-stopped
     environment:
-      - DB_HOST=mariadb
-      - DB_PORT=3306
-      - REDIS_CACHE=redis-cache:6379
-      - REDIS_QUEUE=redis-queue:6379
-      - SOCKETIO_PORT=9000
-      - PYTHONPATH=/home/frappe/frappe-bench/apps/productix
-    volumes:
-      - sites:/home/frappe/frappe-bench/sites
-      - logs:/home/frappe/frappe-bench/logs
-      - assets:/home/frappe/frappe-bench/sites/assets
-      - ./apps/productix:/home/frappe/frappe-bench/apps/productix
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      SOCKETIO_PORT: "9000"
+      <<: *python-apps
+    volumes: *backend-volumes
     depends_on:
       configurator:
         condition: service_completed_successfully
@@ -66,22 +108,29 @@ services:
   frontend:
     image: frappe/erpnext:v15.121.3
     restart: unless-stopped
-    command: nginx -g 'daemon off;'
+    command: sh /usr/local/bin/frontend-entrypoint.sh
     environment:
       BACKEND: backend:8000
       SOCKETIO: websocket:9000
-      FRAPPE_SITE_NAME_HEADER: ${FRAPPE_SITE_NAME_HEADER:-productix.local}
+      FRAPPE_SITE_NAME_HEADER: ${SITE_NAME:-productix.local}
+      NGINX_SITE_NAME: ${SITE_NAME:-productix.local}
       UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
       UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
       UPSTREAM_REAL_IP_RECURSIVE: "off"
       PROXY_READ_TIMEOUT: 120
       CLIENT_MAX_BODY_SIZE: 50m
     volumes:
+      - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
+      - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
+      - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
+      - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
+      # legacy (migration only)
+      - ./apps/productix:/home/frappe/frappe-bench/apps/productix
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
       - assets:/home/frappe/frappe-bench/sites/assets
-      - ./apps/productix:/home/frappe/frappe-bench/apps/productix:ro
-      - ./nginx.conf:/etc/nginx/conf.d/frappe.conf:ro
+      - ./nginx.conf.template:/etc/nginx/conf.d/frappe.conf.template:ro
+      - ./docker/frontend-entrypoint.sh:/usr/local/bin/frontend-entrypoint.sh:ro
     ports:
       - "8080:8080"
     depends_on:
@@ -111,15 +160,12 @@ services:
     restart: unless-stopped
     command: bench worker --queue short,default
     environment:
-      - DB_HOST=mariadb
-      - DB_PORT=3306
-      - REDIS_CACHE=redis-cache:6379
-      - REDIS_QUEUE=redis-queue:6379
-      - PYTHONPATH=/home/frappe/frappe-bench/apps/productix
-    volumes:
-      - sites:/home/frappe/frappe-bench/sites
-      - logs:/home/frappe/frappe-bench/logs
-      - ./apps/productix:/home/frappe/frappe-bench/apps/productix
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      <<: *python-apps
+    volumes: *backend-volumes
     depends_on:
       configurator:
         condition: service_completed_successfully
@@ -131,15 +177,12 @@ services:
     restart: unless-stopped
     command: bench worker --queue long,default
     environment:
-      - DB_HOST=mariadb
-      - DB_PORT=3306
-      - REDIS_CACHE=redis-cache:6379
-      - REDIS_QUEUE=redis-queue:6379
-      - PYTHONPATH=/home/frappe/frappe-bench/apps/productix
-    volumes:
-      - sites:/home/frappe/frappe-bench/sites
-      - logs:/home/frappe/frappe-bench/logs
-      - ./apps/productix:/home/frappe/frappe-bench/apps/productix
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      <<: *python-apps
+    volumes: *backend-volumes
     depends_on:
       configurator:
         condition: service_completed_successfully
@@ -151,15 +194,12 @@ services:
     restart: unless-stopped
     command: bench schedule
     environment:
-      - DB_HOST=mariadb
-      - DB_PORT=3306
-      - REDIS_CACHE=redis-cache:6379
-      - REDIS_QUEUE=redis-queue:6379
-      - PYTHONPATH=/home/frappe/frappe-bench/apps/productix
-    volumes:
-      - sites:/home/frappe/frappe-bench/sites
-      - logs:/home/frappe/frappe-bench/logs
-      - ./apps/productix:/home/frappe/frappe-bench/apps/productix
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      <<: *python-apps
+    volumes: *backend-volumes
     depends_on:
       configurator:
         condition: service_completed_successfully
