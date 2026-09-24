@@ -1,10 +1,4 @@
-# -*- coding: utf-8 -*-
-import sys
-sys.path.insert(0, "/home/frappe/frappe-bench")
-
-import frappe
-
+# Clear the site's frappe cache (incl. the app->modules map) — piped into
+# `bench --site <site> console` by tests/_clear_cache.sh.
 frappe.clear_cache()
-frappe.local.app_modules = None
-frappe.setup_module_map(include_all_apps=True)
-print("CACHE_CLEARED app_modules:", sorted(frappe.local.app_modules.keys()))
+print("CACHE_CLEARED")

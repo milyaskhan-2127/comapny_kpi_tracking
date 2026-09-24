@@ -349,10 +349,11 @@ Backups are archived in the `/backups/` directory with automatic compression.
 - All SMTP credentials are supplied via environment variables (`.env`) only —
   they are **never committed** to the repository. See `.env.example`.
 - Sensitive artifacts (SQL dumps, `.env`, `sites/`, logs) are git-ignored.
-- **⚠️ Existing git history:** the pre-modularization history still contains an
-  old SMTP password string. Rotate/revoke that credential, and rewrite or scrub
-  history (`git filter-repo` / `BFG`) **before** this repository is ever pushed
-  to a shared remote. Never commit customer database dumps.
+- **⚠️ Existing git history:** one old SMTP password string remains in the
+  first three commits (`.env.example` only — scope verified in
+  ACCEPTANCE_EVIDENCE §14). Complete the two-step **rotation + history
+  scrub** procedure in `docs/deployment.md` §7 **before** this repository
+  is ever pushed to a shared remote. Never commit customer database dumps.
 
 ## 📄 License & Attribution
 
