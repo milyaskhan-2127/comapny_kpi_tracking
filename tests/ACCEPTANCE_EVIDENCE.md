@@ -516,3 +516,253 @@ comments.
 
 **Git.** Working tree staged as the known-good pre-retirement state and tagged
 (see §12 for the migration/removal steps that follow).
+
+## 12. In-place migration of the live legacy site `productix.local` (2026-09-24)
+
+Live legacy default site migrated in place (no restore/rebuild): pre-snapshot →
+manifest installs (`_mig_install_apps.sh`, all four `--force`, final migrate) →
+legacy removal from `installed_apps` (`_retire_legacy_live.sh` = retire script +
+settle `bench migrate` + `clear-cache`) → post-snapshot → row-level diff.
+
+**Install/retire outcome.**
+- `installed_apps`: `["frappe","erpnext","productix",+4]` after install, then
+  `["frappe","erpnext",+4 modular]` after retire (`RETIRE_OK`,
+  `Installed Application` rows updated, zero Module Defs owned by `productix`).
+- Module re-ownership (patch `productix_core.migrations.productix.
+  repoint_module_defs`, ran 2026-09-24): `Alerts→core`,
+  `Subscription Management→core`, `Productix Core` module (new, core),
+  `Instruction Room→instruction`, `KPI Tracking→kpi`,
+  `Recipe Management→recipe`; zero modules on app `productix`.
+- Registry (generic discovery): `[] → ["core","instruction","kpi","recipe"]`;
+  entitlement table seeded4 rows (`enabled=1` each) by app `after_install`.
+- `bench migrate` exit 0 after install, after retire (settle), and after the
+  workspace repair below (3 clean runs; no co-install state ever existed).
+
+**Zero-data-loss verdict: `LOCAL_DIFF: ZERO_DATA_LOSS_OK` (exit 0)**
+(`tests/_local_data_snapshot.py` + `tests/_local_diff.py`, pre vs final post;
+`_precheck` scratch DB = pre-dump `…_113554.sql.gz` restored for row-level
+classification). Business counts exact (Recipe8, Recipe Item32, Consumption
+Log20, Production Order10, KPI Definition79, KPI Data Entry5017, KPI
+Department13, KPI Alert202, Machine5, Machine Reading1, Instruction Message8,
+Message Notification36, AI Agent Log25, Item24, Purchase Receipt6, Batch24,
+Supplier6, Productix License1, DefaultValue89, …); meta name sets EXACT
+(Custom Field30, Number Card30, Page26, Property Setter117, Report204, Role66,
+Workspace24); doctype set +2 platform only; installed_apps/registry/entitlement
+as above.
+
+**Transient deltas found, root-caused, and repaired (never guessed):**
+
+1. *Deleted Document +31* — row-level: **all `Scheduled Job Type`** tombstones
+   (`alert_engine…`, `machine_health…`, `tasks.mark_expired_batches`,
+   `run_daily_inventory_scan`, `run_scheduled_predictions`) from hook re-sync
+   delete+recreate; gained/lost set **equal** (G1/G2 empty) → churn, not loss.
+   Classified into diff `BOOKKEEPING` with evidence.
+2. *Installed Application 3→6* — `-1 legacy +4 modular` bookkeeping; classified
+   into `BOOKKEEPING`.
+3. *Workspace `Company Tracking System` Link -6 / Shortcut -2 / role -1; Page
+   `backups` roles -2* — root cause: the committed fixture
+   `apps/productix_kpi/productix_kpi/fixtures/workspace.json` is an **early
+   export** predating the Machine Health card/links, Machine Health + Backup
+   Manager shortcuts and the KPI CEO role; fixture import runs **last** on
+   `bench migrate` (after module-dir sync), so it overwrote the live workspace;
+   the Page `backups` JSON shipped only5 of the7 roles that
+   `productix_kpi.utils.boot.boot_session` provisions (missing `Desk User`,
+   `All`).
+   - Repair: `tests/_rebuild_workspace_fixture.py` reconstructed the workspace
+     doc **exactly** from the pre-dump (`_precheck`) and wrote it to *both*
+     representations (fixture list + module-dir doc =37 links /10 shortcuts /
+    9 roles, cannot diverge again); `page/backups/backups.json` roles →7
+     (matches boot_session) with `modified` bumped so doc sync re-imports.
+   - Post-repair migrate: links37, shortcuts10, workspace roles9, page roles7 —
+     **identical to pre**, residue query empty. (Lost-link label
+     “Enterprise Backup & Restore Manager” vs fixture “Download Backups”:
+     same target Page `backups`; the reconstructed pre-state content was kept
+     verbatim.)
+4. *Recipe workspace fixture-vs-module divergence (documented, not modified):*
+   `fixtures/workspace.json` (32 links/14 roles/13 shortcuts) matches live pre
+   **and** post exactly (no delta — no loss), while the module-dir
+   `recipe_management.json` (35/16/12, `creation` stamped today) diverges.
+   Runtime proves the fixture is the authoritative/last writer (a module-last
+   import would have changed live; it did not), so **no action taken** pending
+   product decision — module-dir file is inert-but-retained; re-export from
+   live recommended if the alternate layout is ever intended.
+
+**Functional verification on the migrated site.**
+- `tests/_migcheck_full.sh productix.local` → `MIGRATION_CHECK_OK`
+  (architecture=modular, no co-install, core tables + registry + entitlement OK).
+- `tests/_web_smoke_local.py productix.local` → exit 0: ping200, login200,
+  recipe/kpi/instruction enabled calls200, ghost app **417 not-installed**
+  (isolation), legacy `productix.api.*` route **417 “App productix is not
+  installed”** (legacy API surface gone), gate disable→403→re-enable→200.
+- Transitional duplicate-Module-Def warnings (`… found in apps productix_* and
+  productix`) observed only while both app folders existed — vanished after
+  folder removal (see removal step).
+
+**Backups re-taken mid-flight:** `productix_local/…ref…_20260924_121929.sql.gz`
+(post-install, pre-retire safety point) alongside the
+`…_113554.sql.gz` pre pair. Scratch DB `_precheck` (read-only grant to the
+site DB user) retained until acceptance completes, then dropped.
+
+## 13. Legacy retirement execution, post-removal validation & future-module E2E (2026-09-24)
+
+### 13.1 Retirement gate → removal (all 13 checks passed first)
+
+- Coverage audit pre-removal: `scripts/audit_legacy_coverage.py` →
+  `LEGACY_COVERAGE_AUDIT: ALL_CHECKS_PASS` **30/30** (frozen here in §11).
+- Backups: `productix_local/ref_pretirement_20260924_113554.sql.gz` +
+  mid-state `_121929` pair, `gzip -t` verified; ref-site dump re-verified
+  (gzip OK, 716 `CREATE TABLE`).
+- Checkpoint commit `fd6acb7` + tag **`pre-legacy-retirement`** = the
+  rollback point (retains `apps/productix/` + all legacy compose/deploy refs).
+- `git rm -r apps/productix` + sweep of 239 untracked leftovers → `apps/` =
+  the four modular apps only.
+- Legacy compose/deploy references removed: backend `PYTHONPATH`, both
+  backend volume mounts, the frontend app mount, the legacy asset symlink,
+  the compose header comment, `deploy.ps1` asset-dir/copy list, and the
+  `deploy.sh`/`setup_site.*` comments → `CONFIG_LEGACY_REFS_CLEAN`;
+  `docker compose config --quiet` exit 0.
+- Containers recreated; bench registries cleaned: legacy line out of
+  `sites/apps.txt`, stale `sites/assets/productix` symlink removed, no
+  `productix` pip package present.
+- **Configurator YAML fix:** the asset-symlink section used a folded scalar
+  (`- >`), which joins every line into one string after the first `#` —
+  silently commenting out the actual `ln -s` commands. Changed to `- |`.
+  Verified: `productix_core`/`recipe`/`kpi` symlinks recreated with
+  container-start mtime; `frappe`/`erpnext` real-dir guards no-op;
+  `productix_instruction` ships no `public/` (no `app_include_*`) so no
+  symlink by design. (Bench `ModuleNotFoundError` tracebacks in the
+  configurator log are bench's own caught `get_app_commands` noise for apps
+  without `commands.py` — harmless.) Recorded in `docs/deployment.md` §4.1.
+- Reference site dropped: DBs `_650d82d1cc877d44` + `_precheck` dropped with
+  their grants, `sites/productix-ref.local` removed; remaining sites =
+  a/b/c/mig/local (5 DBs).
+- Container-FS junk from the phase removed (`.pytest_cache`, stray
+  bench-root `patches.txt`, legacy dump gone with the recreate); ad-hoc
+  `scripts/_q_*.sh` one-offs and the `tests/_migrate_full.log` artifact
+  deleted (findings live in this file; `_mig_run_migrate.sh` regenerates
+  the log).
+
+### 13.2 Post-removal migration re-validation
+
+- `_migcheck_full.sh productix.local` → `MIGRATION_CHECK_OK`;
+  `_migcheck_full.sh productix-mig.local` → `MIGRATION_CHECK_OK`.
+  **`retired_modules` semantics:** pre-removal runs listed `["Alerts"]`
+  only because `_legacy_modules()` reads the legacy `apps/productix/modules.txt`
+  (still present then); with the tree gone, both sites now report `[]`, and
+  `module_def_by_app` has **no `productix` key** (zero Module Defs owned by
+  the retired app).
+- `_web_smoke_local.py productix.local` → exit 0 (ping/login/recipe/kpi/
+  instruction 200, ghost 417, legacy `productix.api.*` **417 “App productix
+  is not installed”**, gate disable→403→re-enable→200);
+  `_web_smoke_mig.py` → exit 0 (same shape on `productix-mig.local`).
+- Bench-wide module-map redis cache (`app_modules`) on `productix.local`
+  still held the legacy app (rebuilt during the settle window, before the
+  `apps.txt`/folder cleanup) → `bench clear-cache`; every site now reports
+  `MODULE_MAP_KEYS = [frappe, erpnext, +4 modular]`, `DUP_WARNINGS=[]`
+  (`tests/_diag_doctype.py`). Last legacy footprint gone.
+
+### 13.3 Static battery (re-run on the final canonical state)
+
+`tests/_battery_static.sh`: `VD_EXIT=0 DEPENDENCIES_OK`, `VM_EXIT=0
+MODULES_OK`, `CA_EXIT=0`, `PT_EXIT=0` (**27 passed**), `AUD_EXIT=0`
+(`LEGACY_COVERAGE_AUDIT: RETIRED (apps/productix absent)` — new retired-mode
+branch), `AP_EXIT=0`.
+
+- Fresh-container pytest root cause + portable fix: frappe opens a
+  HOME-based `~/logs/database.log` fallback at import; `~/logs` is in
+  neither the image nor any volume → `FileNotFoundError` → pytest
+  `INTERNALERROR`. `tests/conftest.py` now creates `~/logs` (plus the site
+  log dirs) **before** importing frappe — proven by `rm -rf /home/frappe/logs`
+  then 27 passed.
+- `_asset_probe.py` reworked: `/assets/*` probed via nginx `frontend:8080`
+  (gunicorn never serves symlinked public assets) and `doctype_js` targets
+  use the public-stripped paths (`/assets/<app>/js/custom_scripts/…`, all
+  200). Module-tree doctype JS paths 404 for every app incl. erpnext =
+  documented framework characteristic.
+- `_verify_assets.py` → `VERDICT: ALL ASSETS OK` (login page, productix
+  source assets, and the hashed desk bundles under `/assets/frappe/dist/…`
+  all 200 through nginx).
+
+### 13.4 Combos, subsets, isolation, gates, field-perm equivalence
+
+- **Combos (baseline and final re-run identical):** A `12/0` (core only),
+  B `13/0` (core+kpi), C `15/0` (all four).
+- **Subsets on C** (interleaved with isolation to halve install/uninstall
+  cycles): Core+Recipe+KPI `14/0`, Core+Recipe `13/0`,
+  Core+Instruction `13/0`.
+- **Isolation ×3:** uninstall instruction / kpi / recipe → `10/0` each
+  (registry + boot shrink, app leaves Installed Applications, site boots,
+  no worker/scheduler/backend residue).
+- **Gates (per-site `_gate_403_combo_c.py` over gunicorn :8000):** for each
+  of recipe/kpi/instruction: baseline 200 → disable 200 → **disabled call
+  403 “Productix module '<k>' is disabled on this site.”** → core ping 200
+  while disabled → re-enable 200 → recovered 200; ghost app **417**
+  (registry-gated only, never 403).
+  *Harness note:* host-facing `gate_403.sh` hits nginx, which forces
+  `X-Frappe-Site-Name: __SITE_NAME__` — it can only exercise the default
+  site. Running it against C disabled C but called local → false FAILs;
+  this usage error is documented in the script header, per-site evidence =
+  `_gate_403_combo_c.py`.
+- **Field/perm equivalence (`tests/_field_perm_equivalence.py`, walks the 43
+  shipped doctype JSONs):** B-vs-C `SHARED=35 MISMATCH=0 EQUIVALENT`
+  (8 `NOT_IN_DB` = exactly the recipe+instruction doctypes); local-vs-C
+  `SHARED=43 MISMATCH=0`.
+
+### 13.5 Future-module E2E (generic discovery proven, zero Core edits)
+
+Scaffolded `apps/productix_manufacturing` from
+`docs/future-module-template.md` (manifest key `manufacturing`, module name
+**“Manufacturing Line”** to avoid colliding with ERPNext’s own
+`Manufacturing` Module Def) + compose `PYTHONPATH`/3 volume entries
+(`docker compose config` 0, `up -d`):
+
+1. **Validators with 5 apps, zero tool edits:** `MODULES_OK` +
+   `DEPENDENCIES_OK`; registry output lists
+   `productix_manufacturing: key='manufacturing' module='Manufacturing Line'`.
+2. **Bench availability:** `install-app` refuses until the app is in
+   `sites/apps.txt` (`get-app` normally appends it) — the concrete
+   “available on bench” vs “installed on site” split.
+3. **Bug found & fixed (now a documented template lesson):** shipping
+   `install.py` **without** `hooks.py` `after_install`/`after_uninstall`
+   declarations means frappe never calls it → registry stayed at 4 keys, no
+   entitlement row was seeded, and `set_entitlement('manufacturing')`
+   answered **417 “not installed on this site.”** After declaring both
+   hooks (list form, as the real apps do): uninstall → reinstall →
+   `REGISTRY=[core, instruction, kpi, manufacturing, recipe]`,
+   `ENTITLEMENT` 5 rows (`manufacturing=1`), `MFG_ENABLED=True`, Module Def
+   owned by `productix_manufacturing`, `installed_apps` includes the scaffold
+   (`tests/_future_module_state.py`).
+4. **Generic gate (`tests/_gate_future_module.py`):** baseline 200 →
+   disable → **403 + standard gate message on an unknown-to-core key** →
+   core ping 200 while disabled → re-enable 200 → recovered 200 →
+   `FUTURE_MODULE_GATE: PASS`.
+5. **Clean uninstall:** registry/entitlement back to 4, `MODULE_DEF=[]`,
+   `installed_apps` back to 6.
+6. **Revert to canonical repo state:** scaffold folder deleted, compose
+   refs removed, `apps.txt` line removed, containers recreated →
+   `docker compose config --quiet` 0, `apps/` = 4 apps, validators green
+   again (4-app registry).
+
+### 13.6 Final canonical-state suite (post-revert)
+
+Static battery all exit 0 (pytest 27, audit RETIRED, assets OK); validators
+4-app OK; combos `12/0`, `13/0`, `15/0`; gates ×3 403-pass; field-perm
+`35/0` + `43/0`; `MIGRATION_CHECK_OK` ×2 (local, mig); web smokes exit 0 ×2;
+`_verify_assets.py` ALL ASSETS OK.
+
+### 13.7 Hygiene & docs
+
+- **Secrets/data:** working tree holds only the documented dev defaults
+  (`Admin@123`, `change_me_strong_password_123` in `.env`/setup
+  scripts/README, each flagged “change it”); no dumps/customer data tracked
+  (`*.sql`, `*.gz`, `sites/`, `.env` ignored; `git ls-files` clean for
+  dumps/env). The legacy SMTP secret exists only in git history → pre-push
+  still requires rotation + history rewrite; **nothing was pushed.**
+- `.gitignore` += `*.log`, `*.gz` (run artifacts).
+- Docs updated to the retired state: `architecture.md` (removal + tag),
+  `rollback.md` (tag pointer + checkout step), `migration.md` (window
+  closed), `deployment.md` (legacy wording + configurator `|` fix),
+  `ownership-matrix.md` (retirement note), `README.md`,
+  `future-module-template.md` (hooks-are-mandatory lesson + E2E proof),
+  `tests/README.md` §4/§5 (battery runner, pytest/`~/logs` notes,
+  retired-mode audit, new harness list).

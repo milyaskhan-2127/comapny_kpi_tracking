@@ -3,8 +3,7 @@ $SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { "productix.local" }
 
 # Same module selection semantics as setup_site.ps1: PRODUCTIX_APPS override,
 # otherwise every app discovered via its productix_module.json manifest.
-# Platform first (manifest flagged "always_enabled"); the legacy apps/productix
-# directory ships no manifest and is never picked up.
+# Platform first (manifest flagged "always_enabled").
 $Manifests = @(Get-ChildItem -Path "apps/productix_*/productix_*/productix_module.json" -ErrorAction SilentlyContinue)
 $PlatformName = ""
 $DiscoveredApps = @()
@@ -29,8 +28,8 @@ if ($PlatformName) {
 Write-Host "Deploying updates to $SITE_NAME (apps: $($ProductixApps -join ', ')) ..." -ForegroundColor Yellow
 
 $pipInstall = ($ProductixApps | ForEach-Object { "/home/frappe/frappe-bench/env/bin/pip install -e apps/$_ --quiet" }) -join " && "
-$assetDirs = (($ProductixApps + @("productix")) | ForEach-Object { "sites/assets/$_" }) -join " "
-$assetCopy = (($ProductixApps + @("productix")) | ForEach-Object { "cp -rn apps/$_/$_/public/* sites/assets/$_/ 2>/dev/null || true" }) -join " && "
+$assetDirs = ($ProductixApps | ForEach-Object { "sites/assets/$_" }) -join " "
+$assetCopy = ($ProductixApps | ForEach-Object { "cp -rn apps/$_/$_/public/* sites/assets/$_/ 2>/dev/null || true" }) -join " && "
 # bench build needs node (bundled under .nvm) on PATH; frappe/erpnext assets
 # must be REAL dirs in the shared volume so nginx serves freshly built bundles
 $assetMats = "if [ -L sites/assets/frappe ]; then rm sites/assets/frappe && cp -a apps/frappe/frappe/public sites/assets/frappe; fi && if [ -L sites/assets/erpnext ]; then rm sites/assets/erpnext && cp -a apps/erpnext/erpnext/public sites/assets/erpnext; fi"

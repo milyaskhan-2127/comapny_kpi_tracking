@@ -1,2 +1,0 @@
-# No external pip dependencies required.
-# frappe and erpnext are bench apps, not pip packages.

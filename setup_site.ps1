@@ -5,7 +5,6 @@
 #   $env:PRODUCTIX_APPS = "productix_core,productix_recipe"   # install subset
 #   (default: every app discovered via its productix_module.json manifest;
 #    the platform app - manifest flagged "always_enabled" - is installed first)
-# The legacy apps/productix directory ships no manifest and is never picked up.
 
 $SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { "productix.local" }
 $ADMIN_PASSWORD = if ($env:ADMIN_PASSWORD) { $env:ADMIN_PASSWORD } else { "Admin@123" }

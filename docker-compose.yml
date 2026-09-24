@@ -6,21 +6,18 @@
 # site. Which apps are INSTALLED on a given site is selected at setup time —
 # see setup_site.ps1 / setup_site.sh (PRODUCTIX_APPS), and the module
 # registry (productix_core) for runtime enable/disable.
-#
-# The legacy monolithic `productix` app stays mounted for the documented
-# migration path (existing DBs migrate first, then retire the old app).
+# (The legacy monolith was retired; see tag `pre-legacy-retirement` and
+# docs/migration.md for rolling an existing legacy database forward.)
 # ============================================================================
 
 x-python-apps: &python-apps
-  PYTHONPATH: /home/frappe/frappe-bench/apps/productix_core:/home/frappe/frappe-bench/apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_instruction:/home/frappe/frappe-bench/apps/productix
+  PYTHONPATH: /home/frappe/frappe-bench/apps/productix_core:/home/frappe/frappe-bench/apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_instruction
 
 x-productix-app-volumes: &productix-app-volumes
   - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
   - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
   - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
   - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
-  # legacy (migration only) — retire after migrating an existing database
-  - ./apps/productix:/home/frappe/frappe-bench/apps/productix
 
 x-backend-volumes: &backend-volumes
   - sites:/home/frappe/frappe-bench/sites
@@ -30,8 +27,6 @@ x-backend-volumes: &backend-volumes
   - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
   - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
   - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
-  # legacy (migration only)
-  - ./apps/productix:/home/frappe/frappe-bench/apps/productix
 
 services:
   configurator:
@@ -40,7 +35,7 @@ services:
     entrypoint:
       - bash
       - -c
-      - >
+      - |
         bench set-config -g db_host mariadb;
         bench set-config -gp db_port 3306;
         bench set-config -g redis_cache redis://redis-cache:6379;
@@ -58,11 +53,11 @@ services:
         if [ -L /home/frappe/frappe-bench/sites/assets/erpnext ]; then rm /home/frappe/frappe-bench/sites/assets/erpnext && cp -a /home/frappe/frappe-bench/apps/erpnext/erpnext/public /home/frappe/frappe-bench/sites/assets/erpnext; fi;
         # productix apps serve source assets through symlinks into the mounted
         # app trees (frontend mounts the apps so these resolve).
+        # NOTE: productix_instruction ships no public/ assets (no app_include_*
+        # hooks), so it intentionally gets no asset link.
         ln -sfn /home/frappe/frappe-bench/apps/productix_core/productix_core/public /home/frappe/frappe-bench/sites/assets/productix_core;
         ln -sfn /home/frappe/frappe-bench/apps/productix_recipe/productix_recipe/public /home/frappe/frappe-bench/sites/assets/productix_recipe;
         ln -sfn /home/frappe/frappe-bench/apps/productix_kpi/productix_kpi/public /home/frappe/frappe-bench/sites/assets/productix_kpi;
-        ln -sfn /home/frappe/frappe-bench/apps/productix_instruction/productix_instruction/public /home/frappe/frappe-bench/sites/assets/productix_instruction;
-        ln -sfn /home/frappe/frappe-bench/apps/productix/productix/public /home/frappe/frappe-bench/sites/assets/productix;
         ln -sfn /home/frappe/frappe-bench/apps/frappe/node_modules /home/frappe/frappe-bench/apps/frappe/frappe/public/node_modules;
         ln -sfn /home/frappe/frappe-bench/apps/erpnext/node_modules /home/frappe/frappe-bench/apps/erpnext/erpnext/public/node_modules;
     environment:
@@ -124,8 +119,6 @@ services:
       - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
       - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
       - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
-      # legacy (migration only)
-      - ./apps/productix:/home/frappe/frappe-bench/apps/productix
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
       - assets:/home/frappe/frappe-bench/sites/assets

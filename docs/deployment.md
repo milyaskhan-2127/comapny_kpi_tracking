@@ -24,9 +24,10 @@ Module selection happens in two layers:
    - Default: **discovered** — every `apps/productix_*/` app shipping a
      `productix_module.json` manifest, with the platform app (manifest
      flagged `always_enabled`, today `productix_core`) installed first. A
-     future app added under `apps/` is picked up with no script edit; the
-     legacy `apps/productix` directory ships no manifest and is never
-     included.
+     future app added under `apps/` is picked up with no script edit (only
+     the compose availability wiring needs the new path — see
+     `future-module-template.md`). The legacy `apps/productix` tree shipped
+     no manifest and has been retired from the repo.
    - Example subset: `PRODUCTIX_APPS="productix_core,productix_recipe"`
    - When `PRODUCTIX_APPS` is set, the platform app is still auto-added
      first if missing.
@@ -88,6 +89,12 @@ must reference exactly those files. Follow these rules:
 - Productix app source assets (`/assets/productix_*`) are served via symlinks
   in the volume that resolve into the app trees, so the **frontend mounts the
   apps too** — see the `frontend` service volumes in `docker-compose.yml`.
+- The configurator's symlink section in `docker-compose.yml` must use a
+  **literal block scalar (`- |`)**, not a folded scalar (`- >`): folding
+  joins every line into one string after the first `#`, silently commenting
+  out the actual `ln -s` commands. This was fixed on 2026-09-24; with `- |`
+  the productix asset symlinks are recreated on every container start
+  (verified by their container-start mtime).
 
 Quick manual check after a deploy (must print 200 for every asset):
 
