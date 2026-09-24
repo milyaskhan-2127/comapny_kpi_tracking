@@ -1,0 +1,2 @@
+# Groq SDK is used by the KPI AI Assistant (/kpi-ai-assistant page).
+groq

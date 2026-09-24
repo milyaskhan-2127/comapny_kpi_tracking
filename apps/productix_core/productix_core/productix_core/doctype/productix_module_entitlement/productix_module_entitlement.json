@@ -1,0 +1,17 @@
+{
+  "name": "Productix Module Entitlement",
+  "module": "Productix Core",
+  "doctype": "DocType",
+  "document_type": "Setup",
+  "engine": "InnoDB",
+  "istable": 1,
+  "fields": [
+    {"fieldname": "module_key", "fieldtype": "Data", "label": "Module Key", "reqd": 1, "in_list_view": 1, "columns": 2},
+    {"fieldname": "module_name", "fieldtype": "Data", "label": "Module", "in_list_view": 1, "columns": 4},
+    {"fieldname": "enabled", "fieldtype": "Check", "label": "Enabled", "default": "1", "in_list_view": 1}
+  ],
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1
+}

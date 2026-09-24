@@ -87,99 +87,88 @@ Built natively as a Frappe application on top of **ERPNext v15**, Productix comb
 
 ## 🏗️ Repository Architecture
 
+Productix was **modularized** from a monolithic app into four independently
+installable Frappe apps (see `docs/architecture.md`):
+
 ```
 productix_erp/
-├── docker-compose.yml                  # Complete multi-container production stack
-├── nginx.conf                          # Reverse proxy & static assets configuration
-├── mariadb.cnf                         # Optimized MariaDB InnoDB configuration
-├── setup_site.sh / setup_site.ps1      # Automated site initialization (Linux & Windows)
-├── deploy.sh / deploy.ps1              # Deployment & migration runner (Linux & Windows)
+├── docker-compose.yml                  # Multi-container stack (mounts all 4 apps)
+├── nginx.conf.template                 # Reverse-proxy template (site name injected)
+├── mariadb.cnf                         # MariaDB InnoDB configuration
+├── .env.example                        # Environment reference (secrets are env-only)
+├── apps.json                           # bench app manifest (erpnext + 4 productix apps)
+├── setup_site.sh / setup_site.ps1      # Site init (PRODUCTIX_APPS selects modules)
+├── deploy.sh / deploy.ps1              # Deployment & migration runner
 ├── backup.sh                           # Standalone database backup script
-├── common_site_config.json.template    # Site configuration template
-├── README.md                           # Project documentation
+├── scripts/                            # Static validators + migration health checks
+│   ├── validate_dependencies.py        #   cross-app import/API hygiene (CI gate)
+│   ├── validate_modules.py             #   registry & module-ownership invariants
+│   └── migration_check.py              #   pre/post migration health report
+├── tests/                              # Acceptance plan + pytest smoke tests
+├── docs/                               # architecture / module-dev / deployment /
+│                                       # on-premise / migration / versioning /
+│                                       # rollback / lifecycle / future-module /
+│                                       # ci-matrix
 │
 └── apps/
-    └── productix/                      # Productix Frappe Application
-        ├── requirements.txt            # Python dependencies (Groq, etc.)
-        ├── setup.py                    # Package setup definition
-        └── productix/
-            ├── hooks.py                # Frappe app hooks & event listeners
-            ├── modules.txt             # Installed modules declaration
-            ├── patches.txt             # Database migration patches
-            ├── setup_data.py           # Default system fixtures & bootstrap data
-            ├── setup_workspace.py      # Desk workspace configuration
-            │
-            ├── recipe_management/      # [MODULE] Recipe & Batch Production
-            │   ├── doctype/
-            │   │   ├── recipe/         # BOM, recipe items, yield & cost
-            │   │   ├── recipe_item/    # Raw material child table
-            │   │   ├── recipe_extra/   # Packaging & overhead child table
-            │   │   ├── production_order/ # Production execution lifecycle
-            │   │   ├── production_order_extra/
-            │   │   └── consumption_log/# FEFO stock consumption audit
-            │   ├── report/             # Production & Costing reports
-            │   └── utils/              # FEFO stock deduction & GRN hooks
-            │
-            ├── kpi_tracking/           # [MODULE] Company KPI Tracking & Analytics
-            │   ├── doctype/
-            │   │   ├── kpi_definition/ # Master KPI configuration & targets
-            │   │   ├── kpi_department/ # Departmental structures
-            │   │   ├── kpi_business_unit/
-            │   │   ├── kpi_formula/    # Dynamic math formula definition
-            │   │   ├── kpi_formula_variable/
-            │   │   ├── kpi_data_entry/ # Periodic actuals submission
-            │   │   ├── kpi_data_entry_value/
-            │   │   ├── kpi_alert/      # Automated alert records
-            │   │   ├── kpi_operational_table/ # Dynamic operational tables
-            │   │   ├── kpi_operational_data/
-            │   │   ├── kpi_template/   # Department starter templates
-            │   │   ├── kpi_user_assignment/
-            │   │   ├── kpi_ceo_access/ # Granular CEO permissions
-            │   │   ├── kpi_ceo_department_access/
-            │   │   ├── kpi_ceo_kpi_access/
-            │   │   ├── machine/        # Machinery registry
-            │   │   ├── machine_type/   # Equipment categories
-            │   │   ├── machine_type_parameter/
-            │   │   ├── machine_reading/# Sensor readings & telemetry
-            │   │   ├── machine_reading_value/
-            │   │   ├── machine_health_log/
-            │   │   └── machine_kpi_link/ # Direct Machine-to-KPI links
-            │   ├── page/               # Custom SPA Dashboards
-            │   │   ├── kpi_company_overview/     # Executive Company Scorecard
-            │   │   ├── kpi_department_dashboard/ # Department Analytics
-            │   │   ├── kpi_setup_wizard/         # Guided KPI Setup Flow
-            │   │   ├── kpi_action_center/        # Alert & Incident Triage
-            │   │   ├── kpi_data_entry_page/      # Rapid bulk data entry
-            │   │   ├── machine_health/           # Live Machine Telemetry UI
-            │   │   └── backups/                  # Integrated Database Backup Page
-            │   ├── report/             # KPI Performance & Audit Reports
-            │   ├── services/           # Analytics, Period, Machine & AI Engines
-            │   └── security/           # Dynamic role permission enforcement
-            │
-            ├── subscription_management/# [MODULE] Licensing & Tenants
-            │   ├── doctype/
-            │   │   ├── productix_license/ # License keys & seat limits
-            │   │   └── productix_tenant/
-            │   └── utils/              # License validation utilities
-            │
-            ├── instruction_room/       # [MODULE] Internal Team Messaging
-            │   └── doctype/
-            │       ├── instruction_message/
-            │       └── message_notification/
-            │
-            ├── alerts/                 # [MODULE] Background Tasks & Notifications
-            │   ├── doctype/ai_agent_log/
-            │   └── tasks.py            # Daily cron jobs for low stock & expiry
-            │
-            ├── api/                    # Custom REST & RPC API Endpoints
-            │   ├── backup.py           # Backup manager backend
-            │   ├── subscription.py     # Payment webhook receiver
-            │   └── inventory.py        # Stock & batch queries
-            │
-            ├── migrations/             # Custom schema & data migrations
-            ├── fixtures/               # Seed roles and custom fields
-            └── public/                 # Client assets (CSS, JS overrides)
+    ├── productix_core/                 # [PLATFORM] Productix Settings, module
+    │   │                               #   registry + entitlement gate, licensing/
+    │   │                               #   tenants, shared audit log + email utils,
+    │   │                               #   boot session (license + unread + modules)
+    │   └── productix_core/
+    │       ├── productix_core/doctype/                     # module folder ("Productix Core")
+    │       │   ├── productix_settings/                     #   entitlement UI
+    │       │   ├── productix_module_entitlement/           #   entitlement child table
+    │       │   └── ai_agent_log/                           #   shared audit log
+    │       ├── modules/registry.py + entitlement.py         # module contract
+    │       ├── subscription_management/                     # licensing & tenants
+    │       ├── migrations/productix/repoint_module_defs     # ownership patch
+    │       └── public/js/productix_core.js                  # is_module_enabled()
+    │
+    ├── productix_recipe/               # [MODULE Recipe Management]
+    │   └── productix_recipe/
+    │       ├── recipe_management/      # recipes, production orders, FEFO, GRN
+    │       ├── api/inventory.py        # stock/batch APIs + trigger_manual_scan
+    │       ├── tasks.py                # scheduled scans (require_module-guarded)
+    │       ├── setup_data.py           # guarded demo seeding
+    │       ├── fixtures/               # custom fields, roles, reports, ...
+    │       └── public/js/              # list-view enhancements + doctype scripts
+    │
+    ├── productix_kpi/                  # [MODULE KPI Tracking]
+    │   └── productix_kpi/
+    │       ├── kpi_tracking/           # KPI definitions, formulas, data entry,
+    │       │                           #   dashboards, machine health, CEO access
+    │       ├── api/backup.py           # backup/restore manager backend
+    │       ├── kpi_tracking/page/backups/  # backup manager page
+    │       ├── fixtures/               # KPI roles, workspace, reports
+    │       └── public/js/              # route guards + KPI user scripts
+    │
+    ├── productix_instruction/          # [MODULE Instruction Room]
+    │   └── productix_instruction/
+    │       └── instruction_room/       # Instruction Message + Message Notification
+    │
+    └── productix/                      # LEGACY monolithic app (migration baseline
+                                        #   only — retired after migration)
 ```
+
+---
+
+## 📚 Documentation
+
+| Document | Purpose |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | Modular app boundary design, module registry & entitlement flow |
+| [`docs/ownership-matrix.md`](docs/ownership-matrix.md) | Complete legacy→app DocType/API/hook/scheduled-job ownership matrix |
+| [`docs/module-development.md`](docs/module-development.md) | How to build a new Productix module app |
+| [`docs/deployment.md`](docs/deployment.md) | Infrastructure, environment variables, secrets handling |
+| [`docs/on-premise.md`](docs/on-premise.md) | Air-gapped / on-premise rollout guidance |
+| [`docs/migration.md`](docs/migration.md) | Migrating an existing monolithic `productix` DB to the modular apps |
+| [`docs/versioning.md`](docs/versioning.md) | Versioning scheme & compatibility matrix |
+| [`docs/rollback.md`](docs/rollback.md) | Rollback strategy & disaster recovery |
+| [`docs/lifecycle.md`](docs/lifecycle.md) | App/module lifecycle & retirement policy |
+| [`docs/future-module-template.md`](docs/future-module-template.md) | Copy-paste template for a new module app |
+| [`docs/ci-matrix.md`](docs/ci-matrix.md) | CI install matrix (A/B/C combinations) |
+| [`tests/README.md`](tests/README.md) | Acceptance test plan & evidence checklist |
 
 ---
 
@@ -216,6 +205,22 @@ cp .env.example .env
 ```
 Edit `.env` to configure your database passwords, admin credentials, and SMTP settings.
 
+> **Modular installation:** set `PRODUCTIX_APPS` to select which Productix apps
+> to install. By default every app discovered via its
+> `apps/<app>/<app>/productix_module.json` manifest is installed, with the
+> platform app (manifest flagged `always_enabled`, today `productix_core`)
+> first — a future app added under `apps/` needs no script change:
+> ```bash
+> # Examples (override the discovered set):
+> PRODUCTIX_APPS="productix_core,productix_recipe"              # Recipe only
+> PRODUCTIX_APPS="productix_core,productix_kpi"                 # KPI only
+> PRODUCTIX_APPS="productix_core,productix_recipe,productix_kpi,productix_instruction"
+> ```
+> `setup_site.sh` / `setup_site.ps1` read `PRODUCTIX_APPS` from the environment
+> or `.env` and install exactly that set (the platform app is auto-added if
+> missing). The legacy `apps/productix` directory ships no manifest and is
+> never picked up.
+
 ### 3. Start Multi-Container Stack
 ```bash
 docker compose up -d
@@ -235,11 +240,19 @@ bash setup_site.sh
 
 This automated script will:
 1. Wait for MariaDB to become healthy
-2. Create the Frappe site `productix.local`
+2. Create the Frappe site `${SITE_NAME:-productix.local}`
 3. Install the standard ERPNext app
-4. Install the custom `productix` app
+4. Install each Productix app (manifest-discovered via `PRODUCTIX_APPS`,
+   platform app first), which registers that app's module(s) in the module
+   registry
 5. Apply database fixtures, roles, and migration patches
 6. Build and compile frontend assets
+
+> **App names:** install via `bench install-app productix_core` and then any of
+> `productix_recipe`, `productix_kpi`, `productix_instruction` — never the
+> legacy `productix` app on a fresh install. The monolith is kept in this
+> repository only as a **migration baseline** for existing databases (see
+> `docs/migration.md`).
 
 ### 5. Access the Application
 Open your browser and navigate to:
@@ -304,9 +317,13 @@ bash deploy.sh
 .\deploy.ps1
 ```
 
+Both runners execute `bench migrate` on the site (running the `repoint_module_defs`
+and other migration patches) and rebuild assets. `deploy.{sh,ps1}` also honour
+`PRODUCTIX_APPS` when bootstrapping a new environment.
+
 To manually run database migrations:
 ```bash
-docker compose exec backend bench --site productix.local migrate
+docker compose exec backend bench --site "$SITE_NAME" migrate
 ```
 
 ---
@@ -324,6 +341,16 @@ bash backup.sh
 Backups are archived in the `/backups/` directory with automatic compression.
 
 ---
+
+## 🔐 Security & Secrets
+
+- All SMTP credentials are supplied via environment variables (`.env`) only —
+  they are **never committed** to the repository. See `.env.example`.
+- Sensitive artifacts (SQL dumps, `.env`, `sites/`, logs) are git-ignored.
+- **⚠️ Existing git history:** the pre-modularization history still contains an
+  old SMTP password string. Rotate/revoke that credential, and rewrite or scrub
+  history (`git filter-repo` / `BFG`) **before** this repository is ever pushed
+  to a shared remote. Never commit customer database dumps.
 
 ## 📄 License & Attribution
 

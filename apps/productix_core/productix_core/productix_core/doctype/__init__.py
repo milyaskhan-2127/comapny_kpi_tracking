@@ -1,0 +1,1 @@
+# Productix Core settings doctypes package.

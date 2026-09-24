@@ -1,0 +1,217 @@
+[
+  {
+    "add_total_row": 0,
+    "columns": [],
+    "disabled": 0,
+    "docstatus": 0,
+    "doctype": "Report",
+    "filters": [],
+    "is_standard": "Yes",
+    "javascript": null,
+    "json": null,
+    "letter_head": null,
+    "modified": "2026-09-19 04:15:38.714623",
+    "module": "KPI Tracking",
+    "name": "KPI Performance and Variance Report",
+    "prepared_report": 0,
+    "query": null,
+    "ref_doctype": "KPI Data Entry",
+    "reference_report": null,
+    "report_name": "KPI Performance and Variance Report",
+    "report_script": null,
+    "report_type": "Script Report",
+    "roles": [
+      {
+        "parent": "KPI Performance and Variance Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "System Manager"
+      },
+      {
+        "parent": "KPI Performance and Variance Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "KPI Admin"
+      },
+      {
+        "parent": "KPI Performance and Variance Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "Administrator"
+      }
+    ],
+    "timeout": 0
+  },
+  {
+    "add_total_row": 0,
+    "columns": [],
+    "disabled": 0,
+    "docstatus": 0,
+    "doctype": "Report",
+    "filters": [],
+    "is_standard": "Yes",
+    "javascript": null,
+    "json": null,
+    "letter_head": null,
+    "modified": "2026-09-19 04:15:38.853566",
+    "module": "KPI Tracking",
+    "name": "Department Performance Report",
+    "prepared_report": 0,
+    "query": null,
+    "ref_doctype": "KPI Department",
+    "reference_report": null,
+    "report_name": "Department Performance Report",
+    "report_script": null,
+    "report_type": "Script Report",
+    "roles": [
+      {
+        "parent": "Department Performance Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "System Manager"
+      },
+      {
+        "parent": "Department Performance Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "KPI Admin"
+      },
+      {
+        "parent": "Department Performance Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "Administrator"
+      }
+    ],
+    "timeout": 0
+  },
+  {
+    "add_total_row": 0,
+    "columns": [],
+    "disabled": 0,
+    "docstatus": 0,
+    "doctype": "Report",
+    "filters": [],
+    "is_standard": "Yes",
+    "javascript": null,
+    "json": null,
+    "letter_head": null,
+    "modified": "2026-09-19 04:15:38.919285",
+    "module": "KPI Tracking",
+    "name": "KPI Trend and Forecast Report",
+    "prepared_report": 0,
+    "query": null,
+    "ref_doctype": "KPI Data Entry",
+    "reference_report": null,
+    "report_name": "KPI Trend and Forecast Report",
+    "report_script": null,
+    "report_type": "Script Report",
+    "roles": [
+      {
+        "parent": "KPI Trend and Forecast Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "System Manager"
+      },
+      {
+        "parent": "KPI Trend and Forecast Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "KPI Admin"
+      },
+      {
+        "parent": "KPI Trend and Forecast Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "Administrator"
+      }
+    ],
+    "timeout": 0
+  },
+  {
+    "add_total_row": 0,
+    "columns": [],
+    "disabled": 0,
+    "docstatus": 0,
+    "doctype": "Report",
+    "filters": [],
+    "is_standard": "Yes",
+    "javascript": null,
+    "json": null,
+    "letter_head": null,
+    "modified": "2026-09-19 04:15:38.994194",
+    "module": "KPI Tracking",
+    "name": "KPI Alert and Action Report",
+    "prepared_report": 0,
+    "query": null,
+    "ref_doctype": "KPI Alert",
+    "reference_report": null,
+    "report_name": "KPI Alert and Action Report",
+    "report_script": null,
+    "report_type": "Script Report",
+    "roles": [
+      {
+        "parent": "KPI Alert and Action Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "System Manager"
+      },
+      {
+        "parent": "KPI Alert and Action Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "KPI Admin"
+      },
+      {
+        "parent": "KPI Alert and Action Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "Administrator"
+      }
+    ],
+    "timeout": 0
+  },
+  {
+    "add_total_row": 0,
+    "columns": [],
+    "disabled": 0,
+    "docstatus": 0,
+    "doctype": "Report",
+    "filters": [],
+    "is_standard": "Yes",
+    "javascript": null,
+    "json": null,
+    "letter_head": null,
+    "modified": "2026-09-19 04:15:39.040749",
+    "module": "KPI Tracking",
+    "name": "KPI Data Quality and Completeness Report",
+    "prepared_report": 0,
+    "query": null,
+    "ref_doctype": "KPI Data Entry",
+    "reference_report": null,
+    "report_name": "KPI Data Quality and Completeness Report",
+    "report_script": null,
+    "report_type": "Script Report",
+    "roles": [
+      {
+        "parent": "KPI Data Quality and Completeness Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "System Manager"
+      },
+      {
+        "parent": "KPI Data Quality and Completeness Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "KPI Admin"
+      },
+      {
+        "parent": "KPI Data Quality and Completeness Report",
+        "parentfield": "roles",
+        "parenttype": "Report",
+        "role": "Administrator"
+      }
+    ],
+    "timeout": 0
+  }
+]

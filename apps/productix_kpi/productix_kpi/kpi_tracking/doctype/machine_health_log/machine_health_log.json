@@ -1,0 +1,37 @@
+{
+  "name": "Machine Health Log",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "document_type": "Document",
+  "engine": "InnoDB",
+  "naming_rule": "Expression",
+  "autoname": "MHL-.YYYY.-.#####",
+  "field_order": [
+    "machine", "machine_name", "log_date",
+    "column_break_1", "health_score", "health_status",
+    "section_components", "component_scores"
+  ],
+  "fields": [
+    {"fieldname": "machine", "fieldtype": "Link", "label": "Machine", "options": "Machine", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "machine_name", "fieldtype": "Data", "label": "Machine Name", "fetch_from": "machine.machine_name", "read_only": 1, "in_list_view": 1},
+    {"fieldname": "log_date", "fieldtype": "Date", "label": "Date", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+    {"fieldname": "health_score", "fieldtype": "Float", "label": "Health Score", "in_list_view": 1},
+    {"fieldname": "health_status", "fieldtype": "Select", "label": "Health Status", "in_list_view": 1,
+     "options": "\nHealthy\nGood\nWarning\nCritical"},
+    {"fieldname": "section_components", "fieldtype": "Section Break", "label": "Component Scores"},
+    {"fieldname": "component_scores", "fieldtype": "JSON", "label": "Component Scores",
+     "description": "Breakdown of health score by parameter category"}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "KPI CEO", "read": 1},
+    {"role": "KPI Employee", "read": 1}
+  ],
+  "sort_field": "log_date",
+  "sort_order": "DESC",
+  "title_field": "machine_name",
+  "search_fields": "machine, machine_name, log_date",
+  "track_changes": 0
+}

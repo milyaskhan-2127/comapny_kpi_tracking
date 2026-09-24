@@ -1,0 +1,41 @@
+{
+  "name": "KPI Variable",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "document_type": "Setup",
+  "engine": "InnoDB",
+  "naming_rule": "By fieldname",
+  "autoname": "field:variable_code",
+  "field_order": ["variable_name", "variable_code", "display_label", "column_break_1", "variable_type", "unit", "is_active", "section_break_2", "description", "section_source", "source_type", "source_doctype", "source_field", "column_break_src", "source_date_field", "source_aggregation", "source_filters", "section_validation", "allow_negative", "decimal_precision"],
+  "fields": [
+    {"fieldname": "variable_name", "fieldtype": "Data", "label": "Variable Name", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "variable_code", "fieldtype": "Data", "label": "Variable Code", "reqd": 1, "unique": 1, "in_list_view": 1, "description": "Stable internal identifier (e.g. REVENUE, FUEL_COST)"},
+    {"fieldname": "display_label", "fieldtype": "Data", "label": "Display Label", "description": "Configurable display name (defaults to Variable Name)"},
+    {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+    {"fieldname": "variable_type", "fieldtype": "Select", "label": "Type", "reqd": 1, "options": "Number\nInteger\nDecimal\nPercentage\nCurrency\nText\nDate\nBoolean\nDuration", "default": "Number", "in_list_view": 1},
+    {"fieldname": "unit", "fieldtype": "Data", "label": "Unit", "description": "e.g. PKR, %, kg, hours"},
+    {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1"},
+    {"fieldname": "section_break_2", "fieldtype": "Section Break", "label": "Description"},
+    {"fieldname": "description", "fieldtype": "Small Text", "label": "Description"},
+    {"fieldname": "section_source", "fieldtype": "Section Break", "label": "Data Source"},
+    {"fieldname": "source_type", "fieldtype": "Select", "label": "Source Type", "options": "Manual Entry\nERPNext DocType\nFormula\nImported Data", "default": "Manual Entry"},
+    {"fieldname": "source_doctype", "fieldtype": "Link", "label": "Source DocType", "options": "DocType", "depends_on": "eval:doc.source_type=='ERPNext DocType'"},
+    {"fieldname": "source_field", "fieldtype": "Data", "label": "Source Field", "depends_on": "eval:doc.source_type=='ERPNext DocType'"},
+    {"fieldname": "column_break_src", "fieldtype": "Column Break"},
+    {"fieldname": "source_date_field", "fieldtype": "Data", "label": "Date Field", "depends_on": "eval:doc.source_type=='ERPNext DocType'"},
+    {"fieldname": "source_aggregation", "fieldtype": "Select", "label": "Aggregation", "options": "\nSUM\nAVG\nCOUNT\nMIN\nMAX", "depends_on": "eval:doc.source_type=='ERPNext DocType'"},
+    {"fieldname": "source_filters", "fieldtype": "JSON", "label": "Source Filters", "depends_on": "eval:doc.source_type=='ERPNext DocType'"},
+    {"fieldname": "section_validation", "fieldtype": "Section Break", "label": "Validation"},
+    {"fieldname": "allow_negative", "fieldtype": "Check", "label": "Allow Negative Values", "default": "0"},
+    {"fieldname": "decimal_precision", "fieldtype": "Int", "label": "Decimal Precision", "default": "2"}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+    {"role": "KPI Admin", "read": 1, "write": 1, "create": 1, "delete": 1}
+  ],
+  "sort_field": "variable_name",
+  "sort_order": "ASC",
+  "title_field": "variable_name",
+  "search_fields": "variable_name, variable_code, display_label",
+  "track_changes": 1
+}

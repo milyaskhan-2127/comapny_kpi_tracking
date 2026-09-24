@@ -13,7 +13,7 @@ def setup_smtp_email_account():
     mail_ssl = os.environ.get("MAIL_USE_SSL", "True").lower() in ("true", "1", "yes")
     mail_tls = os.environ.get("MAIL_USE_TLS", "False").lower() in ("true", "1", "yes")
     mail_user = os.environ.get("MAIL_USERNAME", "support@techohub.net")
-    mail_password = os.environ.get("MAIL_PASSWORD", "REMOVED_SMTP_PASSWORD")
+    mail_password = os.environ.get("MAIL_PASSWORD", "").strip()
     mail_sender = os.environ.get("MAIL_DEFAULT_SENDER", "Productix ERP <support@techohub.net>")
 
     account_name = "Productix Support"

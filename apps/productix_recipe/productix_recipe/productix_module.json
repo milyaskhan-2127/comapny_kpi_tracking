@@ -1,0 +1,9 @@
+{
+  "app": "productix_recipe",
+  "module_key": "recipe",
+  "module_name": "Recipe Management",
+  "title": "Recipe & Production",
+  "description": "Chemical formulation recipes, production orders, batch/FEFO inventory, GRN quality control, and factory reports.",
+  "requires": ["erpnext", "productix_core"],
+  "version": "1.0.0"
+}

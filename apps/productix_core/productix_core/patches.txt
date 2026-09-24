@@ -1,0 +1,3 @@
+# List of patches to run on migrate
+# Format: app.patches.patch_module.execute
+productix_core.migrations.productix.repoint_module_defs

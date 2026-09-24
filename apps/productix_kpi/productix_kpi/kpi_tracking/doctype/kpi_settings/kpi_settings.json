@@ -1,0 +1,38 @@
+{
+  "name": "KPI Settings",
+  "module": "KPI Tracking",
+  "doctype": "DocType",
+  "document_type": "Setup",
+  "engine": "InnoDB",
+  "issingle": 1,
+  "fields": [
+    {"fieldname": "section_company", "fieldtype": "Section Break", "label": "Company Settings"},
+    {"fieldname": "company", "fieldtype": "Link", "label": "Company", "options": "Company"},
+    {"fieldname": "fiscal_year", "fieldtype": "Link", "label": "Fiscal Year", "options": "Fiscal Year"},
+    {"fieldname": "column_break_c1", "fieldtype": "Column Break"},
+    {"fieldname": "currency", "fieldtype": "Link", "label": "Currency", "options": "Currency", "default": "PKR"},
+    {"fieldname": "default_frequency", "fieldtype": "Select", "label": "Default Frequency", "options": "Daily\nWeekly\nMonthly", "default": "Daily"},
+    {"fieldname": "section_prediction", "fieldtype": "Section Break", "label": "Prediction Settings"},
+    {"fieldname": "enable_predictions", "fieldtype": "Check", "label": "Enable Predictions", "default": "1"},
+    {"fieldname": "min_prediction_data_points", "fieldtype": "Int", "label": "Minimum Data Points for Prediction", "default": "5"},
+    {"fieldname": "column_break_p1", "fieldtype": "Column Break"},
+    {"fieldname": "prediction_confidence_threshold", "fieldtype": "Percent", "label": "Prediction Confidence Threshold", "default": "80"},
+    {"fieldname": "section_alerts", "fieldtype": "Section Break", "label": "Alert Settings"},
+    {"fieldname": "enable_alerts", "fieldtype": "Check", "label": "Enable Alerts", "default": "1"},
+    {"fieldname": "alert_cooldown_hours", "fieldtype": "Int", "label": "Alert Cooldown (Hours)", "default": "24"},
+    {"fieldname": "column_break_a1", "fieldtype": "Column Break"},
+    {"fieldname": "repeated_decline_periods", "fieldtype": "Int", "label": "Consecutive Decline Periods for Alert", "default": "3"},
+    {"fieldname": "section_ai", "fieldtype": "Section Break", "label": "AI / Groq Settings"},
+    {"fieldname": "enable_ai_assistants", "fieldtype": "Check", "label": "Enable AI Assistants", "default": "1"},
+    {"fieldname": "groq_api_key", "fieldtype": "Password", "label": "Groq API Key"},
+    {"fieldname": "column_break_ai1", "fieldtype": "Column Break"},
+    {"fieldname": "groq_model", "fieldtype": "Data", "label": "Groq Model", "default": "openai/gpt-oss-120b"},
+    {"fieldname": "section_setup", "fieldtype": "Section Break", "label": "Setup Status"},
+    {"fieldname": "setup_completed", "fieldtype": "Check", "label": "Setup Completed", "default": "0", "read_only": 1}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1},
+    {"role": "KPI Admin", "read": 1, "write": 1}
+  ],
+  "track_changes": 1
+}

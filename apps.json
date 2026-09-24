@@ -4,7 +4,19 @@
     "branch": "version-15"
   },
   {
-    "url": "/home/frappe/frappe-bench/apps/productix",
+    "url": "./apps/productix_core",
+    "branch": "main"
+  },
+  {
+    "url": "./apps/productix_recipe",
+    "branch": "main"
+  },
+  {
+    "url": "./apps/productix_kpi",
+    "branch": "main"
+  },
+  {
+    "url": "./apps/productix_instruction",
     "branch": "main"
   }
 ]

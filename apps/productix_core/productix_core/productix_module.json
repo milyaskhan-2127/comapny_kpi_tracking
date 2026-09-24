@@ -1,0 +1,10 @@
+{
+  "app": "productix_core",
+  "module_key": "core",
+  "module_name": "Productix Core",
+  "title": "Productix Core (Platform)",
+  "description": "Required platform app: Productix Settings, licensing/tenancy, module registry & entitlement enforcement, shared audit log, shared email utilities, boot session.",
+  "requires": ["erpnext"],
+  "version": "1.0.0",
+  "always_enabled": true
+}
