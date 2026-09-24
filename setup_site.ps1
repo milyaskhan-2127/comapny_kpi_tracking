@@ -7,8 +7,34 @@
 #    the platform app - manifest flagged "always_enabled" - is installed first)
 
 $SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { "productix.local" }
-$ADMIN_PASSWORD = if ($env:ADMIN_PASSWORD) { $env:ADMIN_PASSWORD } else { "Admin@123" }
-$MARIADB_ROOT_PASSWORD = if ($env:MARIADB_ROOT_PASSWORD) { $env:MARIADB_ROOT_PASSWORD } else { "change_me_strong_password_123" }
+
+# Production safety: if PRODUCTION=1, require explicit credentials via env vars.
+# For local development, defaults are allowed but a warning is shown.
+if ($env:PRODUCTION -eq "1") {
+    if (-not $env:ADMIN_PASSWORD) {
+        Write-Error "ERROR: PRODUCTION=1 requires ADMIN_PASSWORD to be set in environment"
+        exit 1
+    }
+    if (-not $env:MARIADB_ROOT_PASSWORD) {
+        Write-Error "ERROR: PRODUCTION=1 requires MARIADB_ROOT_PASSWORD to be set in environment"
+        exit 1
+    }
+    $ADMIN_PASSWORD = $env:ADMIN_PASSWORD
+    $MARIADB_ROOT_PASSWORD = $env:MARIADB_ROOT_PASSWORD
+} else {
+    if (-not $env:ADMIN_PASSWORD) {
+        $ADMIN_PASSWORD = "Admin@123"
+        Write-Warning "Using default ADMIN_PASSWORD ('Admin@123'). Set ADMIN_PASSWORD env var or PRODUCTION=1 for production."
+    } else {
+        $ADMIN_PASSWORD = $env:ADMIN_PASSWORD
+    }
+    if (-not $env:MARIADB_ROOT_PASSWORD) {
+        $MARIADB_ROOT_PASSWORD = "change_me_strong_password_123"
+        Write-Warning "Using default MARIADB_ROOT_PASSWORD. Set MARIADB_ROOT_PASSWORD env var or PRODUCTION=1 for production."
+    } else {
+        $MARIADB_ROOT_PASSWORD = $env:MARIADB_ROOT_PASSWORD
+    }
+}
 
 # Discover modular apps from their manifests (no hard-coded app list).
 $Manifests = @(Get-ChildItem -Path "apps/productix_*/productix_*/productix_module.json" -ErrorAction SilentlyContinue)

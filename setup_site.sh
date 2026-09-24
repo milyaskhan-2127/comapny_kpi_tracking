@@ -12,8 +12,28 @@ set -e
 export MSYS_NO_PATHCONV=1
 
 SITE_NAME="${SITE_NAME:-productix.local}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin@123}"
-MARIADB_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD:-change_me_strong_password_123}"
+
+# Production safety: if PRODUCTION=1, require explicit credentials via env vars.
+# For local development, defaults are allowed but a warning is shown.
+if [ "${PRODUCTION:-0}" = "1" ]; then
+    if [ -z "${ADMIN_PASSWORD:-}" ]; then
+        echo "ERROR: PRODUCTION=1 requires ADMIN_PASSWORD to be set in environment" >&2
+        exit 1
+    fi
+    if [ -z "${MARIADB_ROOT_PASSWORD:-}" ]; then
+        echo "ERROR: PRODUCTION=1 requires MARIADB_ROOT_PASSWORD to be set in environment" >&2
+        exit 1
+    fi
+else
+    if [ -z "${ADMIN_PASSWORD:-}" ]; then
+        ADMIN_PASSWORD="Admin@123"
+        echo "WARNING: Using default ADMIN_PASSWORD ('Admin@123'). Set ADMIN_PASSWORD env var or PRODUCTION=1 for production." >&2
+    fi
+    if [ -z "${MARIADB_ROOT_PASSWORD:-}" ]; then
+        MARIADB_ROOT_PASSWORD="change_me_strong_password_123"
+        echo "WARNING: Using default MARIADB_ROOT_PASSWORD. Set MARIADB_ROOT_PASSWORD env var or PRODUCTION=1 for production." >&2
+    fi
+fi
 
 # Discover modular apps from their manifests (no hard-coded app list).
 PLATFORM_APP=""
