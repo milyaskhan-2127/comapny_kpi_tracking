@@ -261,7 +261,9 @@ Open your browser and navigate to:
 👉 **`http://localhost:8080`**
 
 - **Default Administrator**: `Administrator`
-- **Default Password**: `Admin@123` (or password specified in `.env`)
+- **Default Password**: `Admin@123` (or password specified in `.env` / `ADMIN_PASSWORD` env var)
+
+> ⚠️ **Production Safety**: The setup scripts (`setup_site.sh`, `setup_site.ps1`) accept defaults for **local development only**. In production, set `PRODUCTION=1` and provide `ADMIN_PASSWORD` and `MARIADB_ROOT_PASSWORD` via environment variables — the scripts will **fail fast** if these are missing when `PRODUCTION=1`.
 
 ---
 

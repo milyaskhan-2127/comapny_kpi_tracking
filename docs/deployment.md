@@ -54,6 +54,28 @@ subset).
 The site is served on `http://localhost:8080` (Administrator / password from
 `ADMIN_PASSWORD`, default `Admin@123` — change it).
 
+### 3.1 Production credentials
+
+The setup scripts enforce safe defaults:
+
+- **Local development**: `ADMIN_PASSWORD` and `MARIADB_ROOT_PASSWORD` default to
+  `Admin@123` / `change_me_strong_password_123` with a visible warning.
+- **Production** (`PRODUCTION=1`): **no defaults** — the scripts exit with an
+  error unless both `ADMIN_PASSWORD` and `MARIADB_ROOT_PASSWORD` are explicitly
+  provided via environment variables (or `.env` loaded by docker compose).
+
+Example production invocation:
+
+```bash
+PRODUCTION=1 \
+ADMIN_PASSWORD="$(openssl rand -base64 24)" \
+MARIADB_ROOT_PASSWORD="$(openssl rand -base64 24)" \
+PRODUCTIX_APPS="productix_core,productix_recipe,productix_kpi,productix_instruction" \
+./setup_site.sh
+```
+
+The same applies to `setup_site.ps1` on Windows.
+
 ## 4. Updating a running deployment
 
 `./deploy.sh` (or `deploy.ps1`) runs, for each selected app:
