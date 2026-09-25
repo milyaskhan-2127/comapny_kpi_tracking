@@ -1,23 +1,40 @@
 # ============================================================================
 # Productix ERP — Docker Compose (Frappe/ERPNext v15)
 #
-# Productix is modular. The four productix apps (core, recipe, kpi,
-# instruction) are always mounted so any combination can be installed on a
-# site. Which apps are INSTALLED on a given site is selected at setup time —
-# see setup_site.ps1 / setup_site.sh (PRODUCTIX_APPS), and the module
-# registry (productix_core) for runtime enable/disable.
+# Productix is modular, and this file deliberately contains NO module names.
+# Every app found under ./apps is mounted and made importable at container
+# start; which of them get INSTALLED on a given site is chosen at setup time
+# (PRODUCTIX_APPS in .env, or full discovery when it is unset) - see
+# setup_site.ps1 / setup_site.sh - with the module registry handling runtime
+# enable/disable.
 # (The legacy monolith was retired; see tag `pre-legacy-retirement` and
 # docs/migration.md for rolling an existing legacy database forward.)
 # ============================================================================
 
-x-python-apps: &python-apps
-  PYTHONPATH: /home/frappe/frappe-bench/apps/productix_core:/home/frappe/frappe-bench/apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_instruction
+# ---------------------------------------------------------------------------
+# Module source tree - ONE mount, never one per app.
+#
+# ./apps is staged at /opt/productix-apps; docker/productix-apps.sh (sourced
+# by every python service at start) links whatever it finds there into the
+# bench's apps/ tree, exports PYTHONPATH, and rewrites a .pth in
+# site-packages so `docker compose exec` shells can import them too. This
+# replaces the old hard-coded four-app bind mounts and the static
+# PYTHONPATH anchor.
+#
+# Adding a module = adding a folder under ./apps. Zero edits to this file.
+# ---------------------------------------------------------------------------
+x-productix-source: &productix-source ./apps:/opt/productix-apps
+x-productix-shim: &productix-shim ./docker/productix-apps.sh:/usr/local/bin/productix-apps.sh:ro
 
-x-productix-app-volumes: &productix-app-volumes
-  - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
-  - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
-  - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
-  - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
+# The queue and scheduler services have no custom script of their own, so
+# they get this wrapper instead: source the module shim (PYTHONPATH must be
+# in place before any python starts), then hand the original command to the
+# image's own entrypoint. `$$` is compose escaping - the container really
+# sees `$0` / `$@`, i.e. the `command:` below.
+x-python-entrypoint: &python-entrypoint
+  - sh
+  - -c
+  - tr -d '\r' < /usr/local/bin/productix-apps.sh > /tmp/productix-apps.sh && . /tmp/productix-apps.sh && exec /usr/local/bin/entrypoint.sh "$$0" "$$@"
 
 # The `assets` volume MUST be mounted at the image's baked path
 # (/home/frappe/frappe-bench/assets), never at sites/assets.
@@ -34,10 +51,8 @@ x-backend-volumes: &backend-volumes
   - sites:/home/frappe/frappe-bench/sites
   - logs:/home/frappe/frappe-bench/logs
   - assets:/home/frappe/frappe-bench/assets
-  - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
-  - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
-  - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
-  - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
+  - *productix-source
+  - *productix-shim
 
 services:
   configurator:
@@ -60,6 +75,8 @@ services:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
       - assets:/home/frappe/frappe-bench/assets
+      - *productix-source
+      - *productix-shim
       - ./docker/configurator.sh:/usr/local/bin/configurator.sh:ro
     depends_on:
       mariadb:
@@ -89,15 +106,12 @@ services:
       PRODUCTIX_APPS: ${PRODUCTIX_APPS:-}
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      <<: *python-apps
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
       - assets:/home/frappe/frappe-bench/assets
-      - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
-      - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
-      - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
-      - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
+      - *productix-source
+      - *productix-shim
       - ./docker/backend-entrypoint.sh:/usr/local/bin/backend-entrypoint.sh:ro
     depends_on:
       configurator:
@@ -129,10 +143,6 @@ services:
       PROXY_READ_TIMEOUT: 120
       CLIENT_MAX_BODY_SIZE: 50m
     volumes:
-      - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
-      - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
-      - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
-      - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
       - assets:/home/frappe/frappe-bench/assets
@@ -165,13 +175,13 @@ services:
   queue-short:
     image: frappe/erpnext:v15.121.3
     restart: unless-stopped
-    command: bench worker --queue short,default
+    entrypoint: *python-entrypoint
+    command: ["bench", "worker", "--queue", "short,default"]
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
       REDIS_CACHE: redis-cache:6379
       REDIS_QUEUE: redis-queue:6379
-      <<: *python-apps
     volumes: *backend-volumes
     depends_on:
       configurator:
@@ -182,13 +192,13 @@ services:
   queue-long:
     image: frappe/erpnext:v15.121.3
     restart: unless-stopped
-    command: bench worker --queue long,default
+    entrypoint: *python-entrypoint
+    command: ["bench", "worker", "--queue", "long,default"]
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
       REDIS_CACHE: redis-cache:6379
       REDIS_QUEUE: redis-queue:6379
-      <<: *python-apps
     volumes: *backend-volumes
     depends_on:
       configurator:
@@ -199,13 +209,13 @@ services:
   scheduler:
     image: frappe/erpnext:v15.121.3
     restart: unless-stopped
-    command: bench schedule
+    entrypoint: *python-entrypoint
+    command: ["bench", "schedule"]
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
       REDIS_CACHE: redis-cache:6379
       REDIS_QUEUE: redis-queue:6379
-      <<: *python-apps
     volumes: *backend-volumes
     depends_on:
       configurator:

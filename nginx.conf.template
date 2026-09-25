@@ -2,18 +2,27 @@
 # `__SITE_NAME__` is replaced at container start with the SITE_NAME env var
 # by docker/frontend-entrypoint.sh (see docker-compose.yml frontend service).
 # No site names are hard-coded.
-upstream backend-server {
-	server backend:8000 fail_timeout=0;
-}
-
-upstream socketio-server {
-	server websocket:9000 fail_timeout=0;
-}
 
 server {
 	listen 8080 default_server;
 	server_name __SITE_NAME__ _;
 	root /home/frappe/frappe-bench/sites;
+
+	# Upstreams are resolved PER REQUEST, never at config-load time.
+	#
+	# An `upstream { server backend:8000; }` block is resolved exactly once,
+	# when nginx reads its config. Docker hands a recreated container a new IP,
+	# so after a backend-only `docker compose up -d` this nginx would keep
+	# proxying to a dead address and every dynamic route would 502 until someone
+	# restarted the frontend by hand - the opposite of a no-manual-steps boot.
+	# Routing through a variable defers the lookup to request time via Docker's
+	# embedded DNS, so a recreated backend is picked up on its own (at most
+	# `valid=` later). It also removes the startup-time resolution, so nginx no
+	# longer needs `backend` / `websocket` to be resolvable while it boots -
+	# container start order cannot break it either.
+	resolver 127.0.0.11 valid=5s ipv6=off;
+	set $backend_upstream backend:8000;
+	set $socketio_upstream websocket:9000;
 
 	proxy_buffer_size 128k;
 	proxy_buffers 4 256k;
@@ -44,7 +53,7 @@ server {
 		proxy_set_header Origin $scheme://__SITE_NAME__;
 		proxy_set_header Host $host;
 
-		proxy_pass http://socketio-server;
+		proxy_pass http://$socketio_upstream;
 	}
 
 	location / {
@@ -82,7 +91,7 @@ server {
 		proxy_read_timeout 120;
 		proxy_redirect off;
 
-		proxy_pass http://backend-server;
+		proxy_pass http://$backend_upstream;
 	}
 
 	sendfile on;

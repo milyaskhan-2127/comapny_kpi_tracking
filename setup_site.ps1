@@ -62,7 +62,6 @@ if ($PlatformName -and -not ($ProductixApps -contains $PlatformName)) {
 if (-not $ProductixApps) {
     throw "no productix apps discovered under apps/ - run from the repo root or set PRODUCTIX_APPS"
 }
-$HasRecipe = $ProductixApps -contains "productix_recipe"
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Productix ERP - Site Initialization" -ForegroundColor Cyan
@@ -91,11 +90,22 @@ foreach ($app in $ProductixApps) {
 Write-Host "`n[5/6] Running migrations, build, assets sync..." -ForegroundColor Yellow
 docker compose exec backend bash -c "cd /home/frappe/frappe-bench && bench --site $SITE_NAME set-config developer_mode 1 && bench --site $SITE_NAME migrate && bench --site $SITE_NAME clear-cache && bench build --hard-link"
 
-if ($HasRecipe) {
-    Write-Host "`n[6/6] Seeding demo data (recipe module)..."
-    docker compose exec backend bash -c "cd /home/frappe/frappe-bench && bench --site $SITE_NAME execute productix_recipe.setup_data.run"
-} else {
-    Write-Host "`n[6/6] Skipping demo data (productix_recipe not installed)."
+# Optional per-module post-install hook, declared by the module itself:
+#     "post_install": "<dotted.path.callable>"
+# Generic - any module can seed data by adding one field to its own manifest;
+# this script never names an app. Hooks run in install order (platform first).
+Write-Host "`n[6/6] Running module post-install hooks..." -ForegroundColor Yellow
+foreach ($app in $ProductixApps) {
+    $Manifests = @(Get-ChildItem -Path "apps/$app/*/productix_module.json" -ErrorAction SilentlyContinue)
+    foreach ($Manifest in $Manifests) {
+        $Raw = Get-Content $Manifest.FullName -Raw
+        if ($Raw -match '"post_install"\s*:\s*"([^"]+)"') {
+            $Hook = $Matches[1]
+            Write-Host "    Running post_install hook for ${app}: $Hook"
+            docker compose exec backend bash -c "cd /home/frappe/frappe-bench && bench --site $SITE_NAME execute $Hook"
+            if ($LASTEXITCODE -ne 0) { Write-Error "post_install hook failed for $app"; exit 1 }
+        }
+    }
 }
 
 Write-Host "`nRestarting services..." -ForegroundColor Yellow

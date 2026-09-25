@@ -19,6 +19,16 @@ ENV_PIP="$BENCH_DIR/env/bin/pip"
 
 cd "$BENCH_DIR"
 
+# Link every module found under the source tree and build PYTHONPATH.
+# Generic: docker/productix-apps.sh globs ./apps, so this file names no
+# modules. Applied here as well as in the queue/scheduler entrypoint so the
+# `bench` CLI, gunicorn and every worker see an identical import path.
+if [ -f /usr/local/bin/productix-apps.sh ]; then
+    tr -d '\r' < /usr/local/bin/productix-apps.sh > /tmp/productix-apps.sh
+    # shellcheck disable=SC1091
+    . /tmp/productix-apps.sh
+fi
+
 if [ -f "$BENCH_DIR/sites/$SITE/site_config.json" ]; then
     echo "[backend] site '$SITE' already exists - skipping setup"
 else
@@ -48,7 +58,8 @@ else
     done
 
     if [ -n "${PRODUCTIX_APPS:-}" ]; then
-        # explicit selection from .env, e.g. PRODUCTIX_APPS=productix_core,productix_kpi
+        # explicit selection from .env - see the module-selection block in
+        # .env.example for the format and for examples of every valid shape
         PRODUCTIX_APPS_LIST=$(printf '%s' "$PRODUCTIX_APPS" | tr ',' ' ')
     else
         PRODUCTIX_APPS_LIST="$DISCOVERED_APPS"
@@ -67,6 +78,23 @@ else
     if [ "$#" -eq 0 ]; then
         echo "[backend] ERROR: no productix apps discovered under $BENCH_DIR/apps" >&2
         echo "           and PRODUCTIX_APPS is empty." >&2
+        exit 1
+    fi
+
+    # A selection that is not on this host must fail HERE, listing what IS
+    # available, rather than deep inside `pip install` on a half-built site.
+    PRODUCTIX_MISSING=""
+    for app in "$@"; do
+        [ -d "$BENCH_DIR/apps/$app" ] || PRODUCTIX_MISSING="$PRODUCTIX_MISSING $app"
+    done
+    if [ -n "$PRODUCTIX_MISSING" ]; then
+        echo "[backend] ERROR: PRODUCTIX_APPS selected modules that are not present:$PRODUCTIX_MISSING" >&2
+        echo "           Modules available under $BENCH_DIR/apps:" >&2
+        for candidate in "$BENCH_DIR"/apps/productix_*; do
+            [ -d "$candidate" ] || continue
+            echo "             ${candidate##*/}" >&2
+        done
+        echo "           Fix PRODUCTIX_APPS in .env, or drop the missing folder into apps/." >&2
         exit 1
     fi
 
@@ -115,12 +143,22 @@ else
     bench --site "$SITE" clear-cache
     bench build --hard-link
 
-    case " $PRODUCTIX_APPS_LIST " in
-        *" productix_recipe "*)
-            echo "[backend] seeding recipe demo data"
-            bench --site "$SITE" execute productix_recipe.setup_data.run
-            ;;
-    esac
+    # -----------------------------------------------------------------------
+    # Optional per-module post-install hook, declared by the module itself:
+    #     "post_install": "<dotted.path.callable>"
+    # Generic by design - any module (present or future) can seed data by
+    # adding one field to its own manifest. This script never names an app.
+    # Hooks run in install order (platform app first), one per module.
+    # -----------------------------------------------------------------------
+    for app in "$@"; do
+        for manifest in "$BENCH_DIR"/apps/"$app"/*/productix_module.json; do
+            [ -f "$manifest" ] || continue
+            hook=$(sed -n 's/^[[:space:]]*"post_install"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest")
+            [ -n "$hook" ] || continue
+            echo "[backend] running post_install hook for $app: $hook"
+            bench --site "$SITE" execute "$hook"
+        done
+    done
 
     echo "[backend] initial setup complete"
 fi

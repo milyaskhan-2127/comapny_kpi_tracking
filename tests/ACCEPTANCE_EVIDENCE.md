@@ -766,3 +766,134 @@ Static battery all exit 0 (pytest 27, audit RETIRED, assets OK); validators
   `future-module-template.md` (hooks-are-mandatory lesson + E2E proof),
   `tests/README.md` §4/§5 (battery runner, pytest/`~/logs` notes,
   retired-mode audit, new harness list).
+
+---
+
+## 14. De-specialisation + dynamic module wiring (2026-09-26)
+
+Goal of this pass: no code path, config file or document may name a preferred
+combination of modules. Any subset must work, and a new module must be
+addable by dropping a folder into `apps/` - no compose edit, no script edit.
+
+### 14.1 What changed
+
+- `docker-compose.yml` now contains **no module names at all**. The four
+  per-app bind mounts and the static `PYTHONPATH` anchor are replaced by ONE
+  mount: `./apps -> /opt/productix-apps`.
+- New `docker/productix-apps.sh` (sourced, POSIX sh, idempotent) discovers
+  whatever is under that path at container start and:
+  1. links each module into the bench `apps/` tree (for `bench`, `pip
+     install -e`, `frappe.get_app_path`),
+  2. exports `PYTHONPATH` for the process that sources it and everything it
+     execs,
+  3. rewrites `env/lib/python3.*/site-packages/productix-modules.pth`.
+- The `.pth` is what keeps `docker compose exec backend bench ...` working:
+  exec shells receive the image environment, not PID 1's, so a compose-level
+  `PYTHONPATH` no longer reaches them. It is exactly the mechanism the image
+  already uses for `frappe.pth` / `erpnext.pth`, and it needs no interpreter
+  or version knowledge beyond globbing `env/lib/python3*`.
+- `queue-short` / `queue-long` / `scheduler` gained a wrapper entrypoint that
+  sources the shim and then hands the original `command` to the image's own
+  entrypoint. `configurator.sh` and `backend-entrypoint.sh` source it
+  directly. `frontend` needs no app mount (nginx only reads `sites/assets`).
+- The `productix_recipe`-specific `case` block in `backend-entrypoint.sh`,
+  `setup_site.sh` and `setup_site.ps1` is replaced by a generic optional
+  manifest field: `"post_install": "<dotted.callable>"`. Any module can seed
+  data by adding one key to its own manifest; a module with no seeding omits
+  it and no deployment script changes.
+- `backend-entrypoint.sh` fails fast, listing the modules that ARE available,
+  when `PRODUCTIX_APPS` selects something absent from `apps/`.
+- `.env.example` states module selection as a neutral spec plus five
+  equally-valid illustrations - no default combination implied.
+- `tests/_battery_static.sh` compiles `apps/productix_*` (glob, never a list)
+  and now folds every step's exit code into one verdict, so a failing
+  validator can no longer be masked by a later step.
+
+### 14.2 Static battery (backend container)
+
+`BATTERY=PASS`, 7/7 steps:
+
+```
+VD_EXIT=0  VM_EXIT=0  CA_EXIT=0  PT_EXIT=0 (27 passed)
+AUD_EXIT=0 SHIM_EXIT=0 AP_EXIT=0   BATTERY=PASS
+```
+
+`SHIM_EXIT=0` is the new genericity proof (`tests/_test_module_shim.sh`, 13
+assertions, all inside a throwaway sandbox - the real bench tree and the real
+`PYTHONPATH` are never touched): every module folder linked under its own
+name, non-module folders ignored, `PYTHONPATH` exact, idempotent across a
+second run, safe under `set -eu` with and without a source tree, and the
+`.pth` rewritten rather than appended.
+
+### 14.3 Fresh-install matrix - all four combos
+
+Each combo ran as an isolated compose project (`COMPOSE_PROJECT_NAME=px-<id>`,
+fresh volumes, own site name, own host port) and was torn down afterwards with
+an explicit `-p <project> down -v` - never the main project.
+
+| Combo | PRODUCTIX_APPS | list-apps (exact) | smoke | restart | result |
+|---|---|---|---|---|---|
+| A | `productix_core` | `productix_core` | 12/0 | idempotent | **PASS** |
+| B | `productix_core,productix_kpi` | `productix_core, productix_kpi` | 13/0 | idempotent | **PASS** |
+| C | all four written out explicitly | all four | 15/0 | idempotent | **PASS** |
+| D | *unset* (manifest discovery) | all four | 15/0 | idempotent | **PASS** |
+
+Combo D is the important one: it is the default on every fresh host and on the
+development machine, and it produces exactly combo C's installed set with zero
+configuration. Every combo asserted `list-apps` **exactly** (nothing extra,
+nothing missing), HTTP 200 through the frontend, entitlement rows and
+`frappe.boot.productix_modules` matching the installed set, absent modules
+reporting `False`, and `bench migrate` clean.
+
+### 14.4 Post-run state
+
+- Main stack (`productix_erp`) untouched and healthy: 9 containers Up,
+  battery green, 4 apps installed, routes 200.
+- No `px-*` containers, volumes or networks left behind.
+- `git status`: only the intended changes; no build artifacts, no `.egg-info`.
+- Nothing pushed.
+
+### 14.5 nginx upstream resolution (pre-existing 502 found while verifying combo D)
+
+- **Symptom:** after `docker compose up -d --force-recreate backend` (a
+  backend-only change, which any host can hit), every dynamic route on the
+  running stack returned **502**, while `/assets/*` stayed 200. Restarting
+  the frontend restored it - so nginx was proxying a dead address.
+- **Cause:** `nginx.conf.template` used `upstream backend-server { server
+  backend:8000 fail_timeout=0; }`. nginx resolves an `upstream server`
+  hostname **once**, at config-load time. Docker gives a recreated
+  container a new IP, and nginx keeps the old one until reloaded.
+- **Fix:** removed both `upstream` blocks and routed through variables in
+  `server` context:
+
+  ```
+  resolver 127.0.0.11 valid=5s ipv6=off;
+  set $backend_upstream  backend:8000;
+  set $socketio_upstream websocket:9000;
+  ...
+  proxy_pass http://$backend_upstream;
+  proxy_pass http://$socketio_upstream;
+  ```
+
+  A variable defers resolution to request time via Docker's embedded DNS.
+  Side benefit: nginx no longer needs `backend` / `websocket` to be
+  resolvable while it starts, so container start order cannot fail it.
+- **Proof (not just a restart test - the first attempt was inconclusive
+  because Docker reused the same IP):** the backend's former IP
+  `172.18.0.8` was captured by an unrelated container, the backend was
+  brought back on `172.18.0.11`, and all routes were checked **with the
+  frontend never restarted**:
+
+  ```
+  /app                                              200
+  /api/method/ping                                  200
+  /assets/productix_core/js/productix_core.js       200
+  /app/productix-recipe                             200
+  /app/kpi-tracking                                 200
+  /app/instruction-room                             200
+  /socket.io/?EIO=4&transport=polling               200
+  PROOF PASSED: nginx re-resolved to 172.18.0.11 on its own
+  ```
+
+  Same routes still 200 after removing the squatter. Covered in
+  `docs/deployment.md` 4.1.

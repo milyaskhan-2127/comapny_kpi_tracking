@@ -60,6 +60,12 @@ Each app ships `productix_module.json`:
 }
 ```
 
+The optional `post_install` key (declared today only by `productix_recipe`)
+names a dotted callable run once, right after `install-app` — seed/demo
+data. It is read generically by `setup_site.sh`, `setup_site.ps1` and
+`docker/backend-entrypoint.sh`, so **no deployment script names a module**;
+a module that needs no seeding simply omits the key.
+
 `productix_core.modules.registry` (`get_registry`,
 `module_key_for_app`, `module_key_for_module_name`,
 `platform_module_keys`, `invalidate_registry_cache`) discovers every manifest

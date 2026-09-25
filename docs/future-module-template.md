@@ -101,6 +101,12 @@ caches again and prunes the ghost entitlement row on uninstall.
 
 Do **not** set `always_enabled` (only the platform may).
 
+Optional: `"post_install": "productix_<name>.<module>.<function>"` runs that
+callable right after `install-app` (seed/demo data). It is read generically
+by `setup_site.sh`, `setup_site.ps1` and `docker/backend-entrypoint.sh` —
+omit the key and nothing runs, so a module with no seeding needs no hook and
+no changes anywhere. Today only `productix_recipe` declares one.
+
 ## Integration checklist
 
 - [ ] `modules.txt` module name matches registry `module_name`.
@@ -120,11 +126,12 @@ Do **not** set `always_enabled` (only the platform may).
       `deploy.sh/.ps1` — they discover apps from manifests (platform first).
 - [ ] `hooks.py` declares `after_install` / `after_uninstall` as **lists**
       (install.py alone never runs — see the warning above).
-- [ ] Deployment wiring (documented, enumerated by design) does need the new
-      app added: `docker-compose.yml` (backend PYTHONPATH + backend/frontend
-      `./apps/<app>` mounts) and bench availability — `bench get-app`
-      appends the app to `sites/apps.txt`, which `bench install-app`
-      requires (manual append for local compose-only dev).
+- [ ] Deployment wiring needs **no** edits: `docker-compose.yml` mounts
+      `./apps` once and `docker/productix-apps.sh` links whatever it finds
+      (plus `PYTHONPATH`), so a new folder is importable with no compose
+      change. Bench availability still matters — `bench get-app` appends the
+      app to `sites/apps.txt`, which `bench install-app` requires (manual
+      append for local compose-only dev).
 - [ ] `tests/README.md` matrix, `docs/versioning.md` compat row updated.
 - [ ] Fresh-install + subset combo acceptance (see `tests/README.md`).
 

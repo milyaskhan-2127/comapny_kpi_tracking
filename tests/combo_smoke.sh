@@ -39,13 +39,18 @@ ok()   { echo "PASS: $*"; PASS=$((PASS+1)); }
 bad()  { echo "FAIL: $*"; FAIL=$((FAIL+1)); }
 
 echo "================================================================"
-echo " Combo smoke — site=$SITE  expected='$EXPECTED'  absent='$ABSENT'"
+echo " Combo smoke - site=$SITE  expected='$EXPECTED'  absent='$ABSENT'"
 echo "================================================================"
 
+# Port and compose project are overridable so the same script can smoke an
+# isolated combo project (different host port, COMPOSE_PROJECT_NAME) instead
+# of only the main stack.
+PORT="${COMBO_SMOKE_PORT:-8080}"
+
 # 1) /api/method/ping returns 200 through the frontend
-note "check: frontend ping"
+note "check: frontend ping (port $PORT)"
 CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 \
-        "http://localhost:8080/api/method/ping" || echo "000")
+        "http://localhost:$PORT/api/method/ping" || echo "000")
 if [ "$CODE" = "200" ]; then ok "ping -> HTTP $CODE"; else bad "ping -> HTTP $CODE"; fi
 
 BE() {

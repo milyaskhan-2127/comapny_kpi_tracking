@@ -55,10 +55,8 @@ else
 fi
 
 HAS_PLATFORM=0
-HAS_RECIPE=0
 for app in "${PRODUCTIX_APPS_LIST[@]}"; do
     [ "$app" = "$PLATFORM_APP" ] && HAS_PLATFORM=1
-    [ "$app" = "productix_recipe" ] && HAS_RECIPE=1
 done
 if [ -n "$PLATFORM_APP" ] && [ "$HAS_PLATFORM" = "0" ]; then
     PRODUCTIX_APPS_LIST=("$PLATFORM_APP" "${PRODUCTIX_APPS_LIST[@]}")
@@ -143,15 +141,22 @@ docker compose exec -e MSYS_NO_PATHCONV=1 backend bash -c "
   bench build --hard-link
 "
 
-if [ "$HAS_RECIPE" = "1" ]; then
-    echo "Seeding demo data (recipe module)..."
-    docker compose exec -e MSYS_NO_PATHCONV=1 backend bash -c "
-      cd /home/frappe/frappe-bench && \
-      bench --site $SITE_NAME execute productix_recipe.setup_data.run
-    "
-else
-    echo "Skipping demo data (productix_recipe not installed)."
-fi
+# Optional per-module post-install hook, declared by the module itself:
+#     "post_install": "<dotted.path.callable>"
+# Generic - any module can seed data by adding one field to its own manifest;
+# this script never names an app. Hooks run in install order (platform first).
+for app in "${PRODUCTIX_APPS_LIST[@]}"; do
+    for manifest in "apps/$app"/*/productix_module.json; do
+        [ -f "$manifest" ] || continue
+        hook=$(sed -n 's/^[[:space:]]*"post_install"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest")
+        [ -n "$hook" ] || continue
+        echo "    Running post_install hook for $app: $hook"
+        docker compose exec -e MSYS_NO_PATHCONV=1 backend bash -c "
+          cd /home/frappe/frappe-bench && \
+          bench --site $SITE_NAME execute $hook
+        "
+    done
+done
 
 # Restart background services and frontend
 echo "Restarting services to ensure all workers sync with new site..."

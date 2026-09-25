@@ -3,7 +3,8 @@
 ## 1. Topology
 
 The stack is a standard Frappe/ERPNext v15 Docker deployment (`frappe/erpnext:v15.121.3`)
-with the four productix apps mounted from `./apps`:
+with the module source tree mounted from `./apps` (one mount, no per-app
+entries — see §4.1):
 
 - `mariadb` (10.6)
 - `redis-cache` / `redis-queue`
@@ -24,11 +25,13 @@ Module selection happens in two layers:
    - Default: **discovered** — every `apps/productix_*/` app shipping a
      `productix_module.json` manifest, with the platform app (manifest
      flagged `always_enabled`, today `productix_core`) installed first. A
-     future app added under `apps/` is picked up with no script edit (only
-     the compose availability wiring needs the new path — see
+     future app added under `apps/` is picked up with no script edit and no
+     compose edit: `docker/productix-apps.sh` links whatever `./apps`
+     contains, and discovery reads the manifests (see
      `future-module-template.md`). The legacy `apps/productix` tree shipped
      no manifest and has been retired from the repo.
-   - Example subset: `PRODUCTIX_APPS="productix_core,productix_recipe"`
+   - Example subset: `PRODUCTIX_APPS="productix_core,productix_recipe"` —
+     any subset works; the platform app is always included either way.
    - When `PRODUCTIX_APPS` is set, the platform app is still auto-added
      first if missing.
 2. **Runtime enablement** — Productix Settings → *Productix Module
@@ -42,8 +45,9 @@ A fresh clone comes up with **two commands** — no manual `bench` work:
 ```bash
 # 1. Copy environment reference and set real values.
 #    MARIADB_ROOT_PASSWORD and ADMIN_PASSWORD are REQUIRED on a fresh host;
-#    PRODUCTIX_APPS selects which apps to install (unset = every app found
-#    under apps/, e.g. PRODUCTIX_APPS=productix_core,productix_kpi).
+#    PRODUCTIX_APPS selects which apps to install - leave it unset to install
+#    every app found under apps/, or set it to any subset such as
+#    PRODUCTIX_APPS=productix_core
 cp .env.example .env
 
 # 2. Start the stack (background)
@@ -149,15 +153,36 @@ must reference exactly those files. Follow these rules:
   `/home/frappe/.nvm/current/bin` and is **not** on the default `bash`
   `PATH` in the backend container. `deploy.sh` exports it explicitly; if you
   run `bench build` by hand, do the same.
-- Productix app source assets (`/assets/productix_*`) are served via symlinks
-  in the volume that resolve into the app trees, so the **frontend mounts the
-  apps too** — see the `frontend` service volumes in `docker-compose.yml`.
-- The configurator's symlink section in `docker-compose.yml` must use a
-  **literal block scalar (`- |`)**, not a folded scalar (`- >`): folding
-  joins every line into one string after the first `#`, silently commenting
-  out the actual `ln -s` commands. This was fixed on 2026-09-24; with `- |`
-  the productix asset symlinks are recreated on every container start
-  (verified by their container-start mtime).
+- Productix bundles under `/assets/productix_*` are **real directories**
+  written into the shared assets volume by `bench build` (the backend
+  entrypoint removes any symlink an older layout left behind first). nginx
+  only ever reads `sites/assets`, so the **frontend needs no app mounts at
+  all** — see the `frontend` service volumes in `docker-compose.yml`.
+- ⚠️ **Never mount `./apps` at `/home/frappe/frappe-bench/apps`.** That path
+  already holds `frappe` and `erpnext` from the image, so an overlay would
+  hide them. The module tree is mounted once at the staging path
+  `/opt/productix-apps`, and `docker/productix-apps.sh` links each folder it
+  finds into `apps/` at container start (also exporting `PYTHONPATH`).
+  Likewise, do not mount `./apps/<app>` back into `apps/<app>`: the link
+  must stay a **symlink created at runtime**, or a new module folder would
+  require editing `docker-compose.yml` again.
+- nginx resolves its upstreams **per request**, never at config load.
+  `nginx.conf.template` routes through `set $backend_upstream backend:8000;`
+  + `resolver 127.0.0.11 valid=5s`, not an `upstream { server backend:8000; }`
+  block. The `upstream` form is resolved exactly once, when nginx reads its
+  config, and Docker gives a recreated container a new IP — so a
+  backend-only `docker compose up -d` would leave nginx proxying a dead
+  address and **every dynamic route would 502 until someone restarted the
+  frontend by hand**. With the variable form nginx re-resolves through
+  Docker's embedded DNS within `valid=`, so a recreated backend is picked up
+  on its own; it also no longer needs `backend`/`websocket` to be resolvable
+  while it boots, so container start order cannot break it either.
+  (Proven by occupying the backend's former IP with an unrelated container
+  and confirming all routes still return 200 with the frontend untouched —
+  see `tests/ACCEPTANCE_EVIDENCE.md` §14.5.)
+- `docker/productix-apps.sh` is executed only after `tr -d '\r'`, exactly
+  like the other entrypoints — compose strips CR first, so a CRLF checkout
+  on Windows cannot break it.
 
 Quick manual check after a deploy (must print 200 for every asset):
 

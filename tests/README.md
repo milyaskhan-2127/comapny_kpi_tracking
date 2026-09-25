@@ -14,6 +14,19 @@ combination on its own site/DB:
 | A     | `productix_core`                                 | Platform alone is a complete site       |
 | B     | `productix_core,productix_kpi`                   | KPI works with platform only            |
 | C     | `productix_core,productix_recipe,productix_kpi`, `productix_instruction` (+ placeholder Manufacturing) | All apps coexist without stale `productix.` references |
+| D     | *unset*                                          | Manifest discovery (the default) yields exactly combo C with zero configuration |
+
+Every combo can be driven two ways:
+
+* **one shared stack, own site/DB** — `setup_site.sh` / `setup_site.ps1` with
+  `PRODUCTIX_APPS` set, as below; or
+* **a fully isolated compose project** — `COMPOSE_PROJECT_NAME=px-<id>` plus a
+  port override, so the stack gets its own volumes, its own site and its own
+  host port and can be torn down with `down -v` without touching anything
+  else. `tests/combo_smoke.sh` takes `COMBO_SMOKE_PORT` for this.
+
+Combos A–D were all run this way (isolated projects, fresh volumes each) and
+passed; see the evidence log.
 
 Module add/remove pairs (e.g. recipe on a core-only site, kpi removed from a
 full site) are exercised by the isolation suite (§3) against combo C.

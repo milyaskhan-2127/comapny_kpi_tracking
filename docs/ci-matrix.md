@@ -9,8 +9,7 @@ self-hosted runner once push policy is decided).
 ```bash
 python scripts/validate_dependencies.py --apps-dir apps   # exit 0
 python scripts/validate_modules.py --apps-dir apps        # exit 0
-python -m compileall -q apps/productix_core apps/productix_recipe \
-       apps/productix_kpi apps/productix_instruction
+python -m compileall -q apps/productix_*                  # glob, never a list
 ```
 
 Both validators discover apps from `productix_module.json` manifests — no
@@ -18,6 +17,11 @@ hard-coded app list, so a future `productix_manufacturing` is covered without
 CI edits (`tests/test_generic_discovery.py` proves the discovery rules and
 their negatives: duplicate keys, bad deps, missing manifests, cross-app
 ownership, hook mismatches, cycles, version drift, legacy dotted refs).
+
+`tests/_battery_static.sh` runs this gate plus the container-side module shim
+check (`tests/_test_module_shim.sh`), and now folds **every** step's exit code
+into one verdict — a failing validator can no longer be masked by a later step
+that happens to succeed.
 
 Plus the residual-reference sweep (no stale `productix.` module paths in the
 modular apps — the `productix_*` glob picks up future apps too):
@@ -33,6 +37,7 @@ grep -rEn "(^|[^_a-z])(import|from) productix(\b|\.)" apps/productix_* || true
 | A  | `productix_core`                          | Platform alone is a complete site (core-only) |
 | B  | `productix_core,productix_kpi`            | KPI w/o Recipe/Instruction |
 | C  | `productix_core,productix_recipe,productix_kpi,productix_instruction` (+ placeholder `Manufacturing`) | Full stack: all four core modules coexist + recipe overrides validated against real ERPNext manufacturing |
+| D  | *unset* (leave `PRODUCTIX_APPS` commented out) | **Manifest discovery** — the default on every fresh host and on the development machine. Must produce exactly the same installed set as C, with no configuration at all |
 | M  | Migration combo — legacy `productix` baseline DB → install the new apps → retire `productix` | Tests the existing-DB migration path (see §3) |
 
 Steps per combo (from `tests/README.md`):

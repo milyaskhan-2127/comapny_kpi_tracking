@@ -25,6 +25,16 @@ SHARED_ASSETS="$BENCH_DIR/assets"
 
 cd "$BENCH_DIR"
 
+# Link the module source tree into the bench. docker/productix-apps.sh
+# discovers whatever is under ./apps and exports PYTHONPATH - this script
+# names no modules. Needed here too, because `bench` imports the commands
+# module of every app listed in sites/apps.txt.
+if [ -f /usr/local/bin/productix-apps.sh ]; then
+    tr -d '\r' < /usr/local/bin/productix-apps.sh > /tmp/productix-apps.sh
+    # shellcheck disable=SC1091
+    . /tmp/productix-apps.sh
+fi
+
 # ---------------------------------------------------------------------------
 # 1. credentials - read from the environment, never hard-coded
 # ---------------------------------------------------------------------------
@@ -95,6 +105,6 @@ ln -sfn "$BENCH_DIR/apps/erpnext/node_modules" \
 # `bench build` materialises sites/assets/<app> as a real directory - which is
 # what the long-running deployment does. Symlinking them instead would make
 # `bench build` write its bundles back into the bind-mounted source tree.
-# productix_instruction ships no public/ assets, so it never gets one either.
+# A module that ships no public/ assets simply gets no directory at all.
 
 echo "[configurator] ready (site=$SITE)"

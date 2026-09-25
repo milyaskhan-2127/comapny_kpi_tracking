@@ -17,17 +17,25 @@ own hardware/VM and install the productix apps from this repository.
 
 ```bash
 # from the frappe-bench root
-bench get-app productix_core /path/to/repo/apps/productix_core
-bench get-app productix_recipe /path/to/repo/apps/productix_recipe
-bench get-app productix_kpi     /path/to/repo/apps/productix_kpi
-bench get-app productix_instruction /path/to/repo/apps/productix_instruction
+REPO=/path/to/repo
+
+# 1. register every productix app present in the repo - discovered, not listed
+for d in "$REPO"/apps/productix_*; do
+  bench get-app "$d"
+done
 
 bench new-site my-site.local --mariadb-root-password '...' --admin-password '...'
 bench --site my-site.local install-app erpnext
-bench --site my-site.local install-app productix_core
-bench --site my-site.local install-app productix_recipe   # optional
-bench --site my-site.local install-app productix_kpi      # optional
-bench --site my-site.local install-app productix_instruction  # optional
+
+# 2. install what THIS deployment needs. Either every discovered app...
+for d in "$REPO"/apps/productix_*; do
+  bench --site my-site.local install-app "$(basename "$d")"
+done
+
+# ...or just a subset - the platform app is required, the rest are optional:
+#   bench --site my-site.local install-app productix_core
+#   bench --site my-site.local install-app productix_recipe
+
 bench --site my-site.local migrate
 bench --site my-site.local set-config developer_mode 1     # dev only
 bench build --hard-link
@@ -35,7 +43,9 @@ supervisorctl restart all   # or restart bench services
 ```
 
 Dependency order is enforced by `required_apps` in each app's `hooks.py`;
-`bench` installs required apps automatically.
+`bench` installs required apps automatically. Whether an app ends up on the
+site is decided here, not by the repository layout - an app that is present
+but not installed stays inert.
 
 ## 3. Site-name & customer isolation
 

@@ -92,11 +92,11 @@ installable Frappe apps (see `docs/architecture.md`):
 
 ```
 productix_erp/
-├── docker-compose.yml                  # Multi-container stack (mounts all 4 apps)
+├── docker-compose.yml                  # Multi-container stack (mounts ./apps once)
 ├── nginx.conf.template                 # Reverse-proxy template (site name injected)
 ├── mariadb.cnf                         # MariaDB InnoDB configuration
 ├── .env.example                        # Environment reference (secrets are env-only)
-├── apps.json                           # bench app manifest (erpnext + 4 productix apps)
+├── apps.json                           # bench get-app manifest (erpnext + every productix app)
 ├── setup_site.sh / setup_site.ps1      # Site init (PRODUCTIX_APPS selects modules)
 ├── deploy.sh / deploy.ps1              # Deployment & migration runner
 ├── backup.sh                           # Standalone database backup script
