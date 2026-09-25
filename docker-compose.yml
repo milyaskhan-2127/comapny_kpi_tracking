@@ -19,10 +19,21 @@ x-productix-app-volumes: &productix-app-volumes
   - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
   - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
 
+# The `assets` volume MUST be mounted at the image's baked path
+# (/home/frappe/frappe-bench/assets), never at sites/assets.
+#
+# The frappe image's /usr/local/bin/entrypoint.sh runs on every container and
+# does `rm -rf sites/assets && ln -s <baked> sites/assets`. sites/assets is
+# therefore rewritten on every start; if it were a mount point, that `rm`
+# fails with "Device or resource busy" and backend + frontend crash-loop
+# forever. Mounting the volume at the baked path instead makes
+# sites/assets a plain symlink inside the shared `sites` volume, which is
+# stable on every host — and lets Docker seed a fresh volume with the baked
+# frappe/erpnext bundles so nginx works before the first `bench build`.
 x-backend-volumes: &backend-volumes
   - sites:/home/frappe/frappe-bench/sites
   - logs:/home/frappe/frappe-bench/logs
-  - assets:/home/frappe/frappe-bench/sites/assets
+  - assets:/home/frappe/frappe-bench/assets
   - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
   - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
   - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
@@ -33,33 +44,9 @@ services:
     image: frappe/erpnext:v15.121.3
     restart: "no"
     entrypoint:
-      - bash
+      - sh
       - -c
-      - |
-        bench set-config -g db_host mariadb;
-        bench set-config -gp db_port 3306;
-        bench set-config -g redis_cache redis://redis-cache:6379;
-        bench set-config -g redis_queue redis://redis-queue:6379;
-        bench set-config -g redis_socketio redis://redis-queue:6379;
-        bench set-config -gp socketio_port 9000;
-        bench set-config -g default_site ${SITE_NAME:-productix.local};
-        bench set-config -g allow_cors "*";
-        # frappe/erpnext assets must be REAL directories inside the shared
-        # "assets" volume so that (a) nginx serves bundles from the volume and
-        # (b) `bench build` output written under sites/assets is visible to the
-        # frontend container. If a previous configurator leaked a symlink,
-        # replace it with a real copy (idempotent: no-op when already a dir).
-        if [ -L /home/frappe/frappe-bench/sites/assets/frappe ]; then rm /home/frappe/frappe-bench/sites/assets/frappe && cp -a /home/frappe/frappe-bench/apps/frappe/frappe/public /home/frappe/frappe-bench/sites/assets/frappe; fi;
-        if [ -L /home/frappe/frappe-bench/sites/assets/erpnext ]; then rm /home/frappe/frappe-bench/sites/assets/erpnext && cp -a /home/frappe/frappe-bench/apps/erpnext/erpnext/public /home/frappe/frappe-bench/sites/assets/erpnext; fi;
-        # productix apps serve source assets through symlinks into the mounted
-        # app trees (frontend mounts the apps so these resolve).
-        # NOTE: productix_instruction ships no public/ assets (no app_include_*
-        # hooks), so it intentionally gets no asset link.
-        ln -sfn /home/frappe/frappe-bench/apps/productix_core/productix_core/public /home/frappe/frappe-bench/sites/assets/productix_core;
-        ln -sfn /home/frappe/frappe-bench/apps/productix_recipe/productix_recipe/public /home/frappe/frappe-bench/sites/assets/productix_recipe;
-        ln -sfn /home/frappe/frappe-bench/apps/productix_kpi/productix_kpi/public /home/frappe/frappe-bench/sites/assets/productix_kpi;
-        ln -sfn /home/frappe/frappe-bench/apps/frappe/node_modules /home/frappe/frappe-bench/apps/frappe/frappe/public/node_modules;
-        ln -sfn /home/frappe/frappe-bench/apps/erpnext/node_modules /home/frappe/frappe-bench/apps/erpnext/erpnext/public/node_modules;
+      - tr -d '\r' < /usr/local/bin/configurator.sh > /tmp/configurator.sh && exec sh /tmp/configurator.sh
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
@@ -67,10 +54,13 @@ services:
       REDIS_QUEUE: redis-queue:6379
       SOCKETIO_PORT: "9000"
       SITE_NAME: ${SITE_NAME:-productix.local}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
-      - assets:/home/frappe/frappe-bench/sites/assets
+      - assets:/home/frappe/frappe-bench/assets
+      - ./docker/configurator.sh:/usr/local/bin/configurator.sh:ro
     depends_on:
       mariadb:
         condition: service_healthy
@@ -82,18 +72,28 @@ services:
   backend:
     image: frappe/erpnext:v15.121.3
     restart: unless-stopped
-    command: sh /usr/local/bin/backend-entrypoint.sh
+    # `tr -d '\r'` neutralises CRLF line endings a Windows checkout may have
+    # introduced, so the script always runs with LF endings regardless of the
+    # host's `core.autocrlf` setting.
+    command:
+      - sh
+      - -c
+      - tr -d '\r' < /usr/local/bin/backend-entrypoint.sh > /tmp/backend-entrypoint.sh && exec sh /tmp/backend-entrypoint.sh
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
       REDIS_CACHE: redis-cache:6379
       REDIS_QUEUE: redis-queue:6379
       SOCKETIO_PORT: "9000"
+      SITE_NAME: ${SITE_NAME:-productix.local}
+      PRODUCTIX_APPS: ${PRODUCTIX_APPS:-}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       <<: *python-apps
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
-      - assets:/home/frappe/frappe-bench/sites/assets
+      - assets:/home/frappe/frappe-bench/assets
       - ./apps/productix_core:/home/frappe/frappe-bench/apps/productix_core
       - ./apps/productix_recipe:/home/frappe/frappe-bench/apps/productix_recipe
       - ./apps/productix_kpi:/home/frappe/frappe-bench/apps/productix_kpi
@@ -112,7 +112,12 @@ services:
   frontend:
     image: frappe/erpnext:v15.121.3
     restart: unless-stopped
-    command: sh /usr/local/bin/frontend-entrypoint.sh
+    # `tr -d '\r'` neutralises CRLF line endings a Windows checkout may have
+    # introduced — see the note on the backend service.
+    command:
+      - sh
+      - -c
+      - tr -d '\r' < /usr/local/bin/frontend-entrypoint.sh > /tmp/frontend-entrypoint.sh && exec sh /tmp/frontend-entrypoint.sh
     environment:
       BACKEND: backend:8000
       SOCKETIO: websocket:9000
@@ -130,7 +135,7 @@ services:
       - ./apps/productix_instruction:/home/frappe/frappe-bench/apps/productix_instruction
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
-      - assets:/home/frappe/frappe-bench/sites/assets
+      - assets:/home/frappe/frappe-bench/assets
       - ./nginx.conf.template:/etc/nginx/conf.d/frappe.conf.template:ro
       - ./docker/frontend-entrypoint.sh:/usr/local/bin/frontend-entrypoint.sh:ro
     ports:

@@ -228,20 +228,16 @@ Edit `.env` to configure your database passwords, admin credentials, and SMTP se
 docker compose up -d
 ```
 
-### 4. Initialize Site & Install Apps (Run Once)
+### 4. Site initialization (automatic on first start)
 
-**On Linux / macOS:**
-```bash
-bash setup_site.sh
-```
+**No manual step is required.** On a fresh clone the first
+`docker compose up -d` bootstraps the site by itself: the `configurator`
+service validates `.env` (it aborts `up` with an explicit message if
+`MARIADB_ROOT_PASSWORD` / `ADMIN_PASSWORD` are missing, instead of letting
+the backend restart-loop), then the backend entrypoint
+(`docker/backend-entrypoint.sh`) runs:
 
-**On Windows (PowerShell):**
-```powershell
-.\setup_site.ps1
-```
-
-This automated script will:
-1. Wait for MariaDB to become healthy
+1. Wait for MariaDB to become healthy (compose `depends_on`)
 2. Create the Frappe site `${SITE_NAME:-productix.local}`
 3. Install the standard ERPNext app
 4. Install each Productix app (manifest-discovered via `PRODUCTIX_APPS`,
@@ -249,6 +245,14 @@ This automated script will:
    registry
 5. Apply database fixtures, roles, and migration patches
 6. Build and compile frontend assets
+7. Hand over to gunicorn
+
+Every later restart detects the existing site and skips straight to (7).
+
+`setup_site.sh` / `setup_site.ps1` remain available as the **manual** path —
+provisioning a second site, adding apps to an existing site, or when you
+want the `PRODUCTION=1` credential enforcement (see "Production Safety"
+below).
 
 > **App names:** install via `bench install-app productix_core` and then any of
 > `productix_recipe`, `productix_kpi`, `productix_instruction` — never the

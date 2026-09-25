@@ -37,14 +37,40 @@ Module selection happens in two layers:
 
 ## 3. Fresh deployment
 
+A fresh clone comes up with **two commands** — no manual `bench` work:
+
 ```bash
-# 1. Copy environment reference and set real values (SMTP, DB password, ...)
+# 1. Copy environment reference and set real values.
+#    MARIADB_ROOT_PASSWORD and ADMIN_PASSWORD are REQUIRED on a fresh host;
+#    PRODUCTIX_APPS selects which apps to install (unset = every app found
+#    under apps/, e.g. PRODUCTIX_APPS=productix_core,productix_kpi).
 cp .env.example .env
 
 # 2. Start the stack (background)
-docker compose up -d          # or: docker compose up -d mariadb redis-cache redis-queue configurator backend websocket queue-short queue-long scheduler frontend
+docker compose up -d
+```
 
-# 3. Create site + install apps (choose PRODUCTIX_APPS as needed)
+What happens automatically:
+
+1. **configurator** (`docker/configurator.sh`) runs first. It aborts with an
+   explicit message if `MARIADB_ROOT_PASSWORD`/`ADMIN_PASSWORD` are missing
+   (so a bad `.env` fails `docker compose up -d` cleanly instead of leaving
+   the backend restart-looping), then writes the global bench config and
+   links `sites/assets` to the shared assets volume.
+2. **backend entrypoint** (`docker/backend-entrypoint.sh`) notices the site
+   does not exist yet and, on its own: discovers the apps under `apps/`
+   (or honours `PRODUCTIX_APPS`), runs `bench new-site`, installs ERPNext
+   plus the selected productix apps, then `migrate` / `clear-cache` /
+   `bench build --hard-link`, and seeds the recipe demo data **only** when
+   `productix_recipe` is selected.
+3. It hands over to the image's `start.sh` (gunicorn). Later restarts detect
+   the existing site and skip straight to gunicorn.
+
+`setup_site.sh` / `setup_site.ps1` remain the *manual* path — use them to
+provision a second site, to add apps to an existing site, or when you want
+the `PRODUCTION=1` credential enforcement from §3.1:
+
+```bash
 PRODUCTIX_APPS="productix_core,productix_recipe,productix_kpi,productix_instruction" ./setup_site.sh
 ```
 
@@ -88,8 +114,23 @@ The same applies to `setup_site.ps1` on Windows.
 
 ### 4.1 Assets / CSS serving (important)
 
-The frontend (nginx) and backend share the `assets` Docker volume mounted at
-`/home/frappe/frappe-bench/sites/assets`. Both must see the **same** bundle
+The frontend (nginx) and backend share the `assets` Docker volume, mounted at
+**`/home/frappe/frappe-bench/assets`** (the image's baked path).
+`sites/assets` is a *symlink* to it that the image's
+`/usr/local/bin/entrypoint.sh` recreates on every container start.
+
+> ⚠️ **Never mount the `assets` volume at `sites/assets`.** That path is
+> rewritten on every start by the image entrypoint
+> (`rm -rf sites/assets && ln -s <baked> sites/assets`). If it is a mount
+> point, that `rm` fails with `Device or resource busy`, the entrypoint
+> exits non-zero, and **backend and frontend restart-loop forever** — on any
+> host whose `sites` volume does not already contain the symlink. Mounting
+> at the baked path keeps `sites/assets` a plain symlink inside the shared
+> `sites` volume, which is stable everywhere, and lets Docker seed a fresh
+> volume with the baked frappe/erpnext bundles so nginx works before the
+> first `bench build`.
+
+Both must see the **same** bundle
 files, and `assets.json` (the URL map the served pages are rendered from)
 must reference exactly those files. Follow these rules:
 
@@ -157,8 +198,11 @@ a *different*, current credential, and the one decryptable Email Account
 row (site `productix.local`) holds that different value, not the exposed
 one.
 
-**Nothing has ever been pushed.** Complete BOTH steps, in this order,
-before the first push:
+**Status.** Step 2 (history scrub) is **done**: `git filter-repo
+--replace-text` was run locally and the rewritten history has been pushed.
+Step 1 (rotation) is **still outstanding** — it is the only thing that makes
+the historical string harmless, so do it before the credential is used
+anywhere else:
 
 1. **Rotate the old credential (operator action — do this now):** revoke
    the old password for `support@techohub.net` at `mail.techohub.net`.
@@ -166,8 +210,9 @@ before the first push:
    system; after rotation the historical string is dead even while it
    still exists in history.
 
-2. **Scrub history (before the first push):** run on a fresh clone (or
-   with `--force` if re-running):
+2. **Scrub history (already completed on this repo; kept for reference and
+   for re-verifying a clone):** run on a fresh clone (or with `--force` if
+   re-running):
 
    ```bash
    # build the replacement patterns file without echoing the secret into docs:

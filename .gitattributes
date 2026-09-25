@@ -1,1 +1,5 @@
-﻿*.sh text eol=lf
+# Shell scripts must be checked out with LF endings: a CRLF checkout makes
+# /bin/sh abort (`set: Illegal option -o pipefail`, stray ^M on commands).
+# docker-compose.yml additionally strips CR before exec as belt-and-braces,
+# but this is the primary guarantee.
+*.sh text eol=lf
