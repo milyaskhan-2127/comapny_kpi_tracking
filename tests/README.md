@@ -102,8 +102,17 @@ env/bin/python -m pytest tests/test_generic_discovery.py -q      # manifest-disc
 
 > **One-shot runner:** `bash tests/_battery_static.sh` (in the backend
 > container) executes both validators, `compileall`, the two pytest modules,
-> the legacy-coverage audit and the asset probe, printing `*_EXIT=n` for
-> each. `pytest` is a test-only dependency installed ephemerally into the
+> the legacy-coverage audit, the asset probe and the **deployment self-heal
+> guards** (`DEPLOY_EXIT`), printing `*_EXIT=n` for each. The deployment step
+> reads `docker/backend-entrypoint.sh`, `docker/configurator.sh`,
+> `docker-compose.yml` and `nginx.conf.template` through the read-only mounts
+> declared on the backend service, and asserts mechanisms only — that setup is
+> decided from database state rather than a file's existence, that the root
+> password is really authenticated, that the healthcheck can tell the truth,
+> that nginx never pins a container IP, and that no module name appears
+> anywhere in the deployment layer. No assertion names a module, so adding one
+> cannot change the result. `pytest` is a test-only dependency installed
+> ephemerally into the
 > container env — a `docker compose up -d` recreate wipes it (the battery
 > re-installs it automatically). `tests/conftest.py` also creates `~/logs`,
 > the HOME-based logger fallback frappe opens at import time on a fresh
@@ -162,7 +171,8 @@ docker compose exec -T backend env/bin/python /tmp/asset_probe.py
 Post-retirement harness (all retained under `tests/`):
 
 - `_battery_static.sh` — static battery runner (validators, compileall,
-  pytest, audit, asset probe) with exit codes per stage.
+  pytest, audit, asset probe, deployment self-heal guards) with exit codes
+  per stage.
 - `_field_perm_equivalence.py <siteA> <siteB>` — DocField/DocPerm
   equivalence over the shipped doctype set (B-vs-C → `SHARED=35 MISMATCH=0`;
   local-vs-C → `SHARED=43 MISMATCH=0`).

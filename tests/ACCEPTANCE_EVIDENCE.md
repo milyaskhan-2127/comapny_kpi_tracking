@@ -897,3 +897,365 @@ reporting `False`, and `bench migrate` clean.
 
   Same routes still 200 after removing the squatter. Covered in
   `docs/deployment.md` 4.1.
+---
+
+## 15. Half-created site: verify the database, never a file (2026-09-26)
+
+Reported from a second host: all nine containers `Up`, `mariadb` and the
+backend both reporting `healthy`, yet every request answered **502**, later
+**500**. The site never recovered on its own, and restarting did not help.
+
+### 15.1 Causal chain
+
+| # | Where | Exact error | Consequence |
+|---|---|---|---|
+| 1 | install, at `bench new-site` | `Access denied for user 'root'@'...' (using password: YES)` during the `DROP USER` step | install died **after** `site_config.json` had been written |
+| 2 | mariadb healthcheck | `mysqladmin ping` exited 0 despite the refusal | reported `healthy` - a false pass, no failure signal |
+| 3 | configurator | checked only that `MARIADB_ROOT_PASSWORD` was *set*, never that it worked | `docker compose up -d` proceeded normally |
+| 4 | every request | `pymysql.err.OperationalError: (1045, "Access denied for user '_5a5cc...'@'...'")` | HTTP **500** |
+| 5 | nginx, while gunicorn was not yet listening | `connect() failed (111: Connection refused) while connecting to upstream` | HTTP **502** |
+| 6 | (fixed in section 14.5) | static `upstream` block pinned a stale container IP | 502 after every container recreate |
+
+`.env` ? `MARIADB_ROOT_PASSWORD` no longer matched the password the existing
+`db-data` volume had been initialised with. Links 2 and 3 both passed anyway,
+so nothing stopped the boot.
+
+The decisive bug was the entrypoint's skip condition:
+
+```sh
+if [ -f "$BENCH_DIR/sites/$SITE/site_config.json" ]; then
+    echo "[backend] site '$SITE' already exists - skipping setup"
+```
+
+`bench new-site` writes that file **before** it touches MariaDB, so a refused
+root password left a configuration file with no database behind it. Existence
+of a file was read as "site installed": setup was skipped, gunicorn booted
+against a database that did not exist, and 1045 ? 500/502 repeated forever.
+Because the decision was based on a file, restarting could never heal it.
+
+The failing object was the site's database `_5a5cc2442a2840be` - a hash of
+the site path, not of any application. Zero module names appear in any of the
+errors, all four apps were installed (discovery mode) when it failed, and an
+app absent from `apps/` caused no error either: **the fault had nothing to do
+with which combination was selected.**
+
+### 15.2 What changed in this repository
+
+| File | Change |
+|---|---|
+| `docker/backend-entrypoint.sh` | Replaced the file-existence skip with `site_verdict` ? `fresh` / `ok` / `reinstall` / `fatal:*`, driven by the database: config present, database present, schema non-empty, the site's own credentials authenticate. Added `mysql_run`, `sql_escape`, `repair_site_grants`, `report_fatal`, `root_state`, `orphan_guard`; a pre-install root fail-fast; and a **post-install re-verification** so gunicorn never starts on a database that cannot answer. |
+| `docker/configurator.sh` | Real `SELECT 1` authentication test with an actionable message, before any other service starts. |
+| `docker-compose.yml` | Backend healthcheck (`curl -H "Host: $$SITE_NAME" .../api/method/ping`, `start_period: 900s`); comment explaining why the mariadb healthcheck is deliberately liveness-only; read-only mounts of the deployment sources so the battery can guard them. |
+| `nginx.conf` | **Deleted** - stale, never mounted, still carrying the static-upstream block from section 14.5. |
+| `tests/_battery_static.sh` | New `deployment self-heal guards` step (`DEPLOY_EXIT`). |
+| `docs/deployment.md` section 3 | Rewritten to describe the verdict flow. |
+
+A mismatched site password on a database that **holds data** is repaired
+(`CREATE USER IF NOT EXISTS` + `ALTER USER` + `GRANT` - accounts only, never a
+table) instead of being reinstalled; `reinstall` is only reachable when the
+schema has zero tables.
+
+### 15.3 A regression this fix introduced - found by testing it
+
+The first run of the new configurator check **failed every fresh deployment**:
+
+```
+ERROR: MariaDB at mariadb:3306 did not answer: ERROR 2002 (HY000): Can't connect to server on 'mariadb' (115)
+```
+
+The MariaDB container logs show why:
+
+```
+10:09:30  mysqld: ready for connections.  socket: '/run/mysqld/mysqld.sock'  port: 0    ? temporary server
+10:09:30  healthcheck `mysqladmin ping -h localhost` ? succeeds (it answers on the SOCKET)
+10:09:30  configurator `mysql -h mariadb:3306`        ? no TCP listener yet   ? exit 1
+10:09:34  mysqld: ready for connections.  port: 3306                            ? real server
+```
+
+During first-time initialisation MariaDB runs a temporary server that
+listens on the unix socket but with **`port: 0`** - so `healthy` genuinely
+precedes a reachable `3306`. A single-shot credential check therefore turned
+a harmless race into a hard failure on every new host.
+
+**Fix (generic):** the two outcomes are now treated differently. A *refused*
+password fails immediately, because that is the failure the check exists for;
+an *unreachable* server is retried against a deadline (`DB_READY_TIMEOUT`,
+default 180 s), because it is almost always initialisation. The same
+distinction was applied to the entrypoint via `root_state` ? `ok` / `auth` /
+`connect`, so a connection problem is reported as `fatal:root-connect` rather
+than being mislabelled `fatal:root-auth`. Neither path contains a fixed sleep
+that would stall a healthy start.
+
+### 15.4 Regression guard in the static battery
+
+`tests/_battery_static.sh` gained a `deployment self-heal guards` step
+(`DEPLOY_EXIT`), asserting mechanisms only - no assertion names a module, so
+adding a module cannot change the result:
+
+1. entrypoint parses under `sh -n`, contains `site_verdict` and
+   `FINAL_VERDICT`, does **not** contain `already exists - skipping setup`,
+   still discovers modules through `productix_module.json`, and hands over to
+   `start.sh` **after** the final verdict;
+2. configurator parses and contains both `MARIADB_ROOT_PASSWORD was rejected`
+   and a real `SELECT 1` (a set-only check fails);
+3. compose has the ping healthcheck, its `Host: $$SITE_NAME` header and a
+   first-boot-safe `start_period`, and **hard-codes no module**
+   (`grep -o 'productix_[a-z0-9_]*'` ? empty);
+4. the nginx template has no static `upstream` block and still has its
+   `resolver`;
+5. behaviour: root really authenticates, and the exact probe the compose
+   healthcheck runs answers 200.
+
+The guard was proven to be capable of failing - a marker line was added to
+`docker-compose.yml`, then to the entrypoint, and removed after each run:
+
+```
+--- deployment self-heal guards ---
+  !! docker-compose.yml hard-codes a module: productix_kpi
+DEPLOY_EXIT=1
+!! deployment_self_heal FAILED (exit 1)
+BATTERY=FAIL (1 step(s) failed)
+
+--- deployment self-heal guards ---
+  !! entrypoint skips setup whenever site_config.json exists (the original bug)
+DEPLOY_EXIT=1
+!! deployment_self_heal FAILED (exit 1)
+BATTERY=FAIL (1 step(s) failed)
+```
+
+Both markers were then removed and the battery returned to `BATTERY=PASS`
+with `DEPLOY_EXIT=0`.
+
+### 15.5 Evidence (live runs, 2026-09-26)
+
+All runs on this machine against this working tree (nothing committed).
+
+**A. Happy path - existing site.** Backend restarted to exercise the final
+entrypoint: `site verdict: ok` ? `site verified` ? `starting gunicorn`,
+`restarts=0`, `(healthy)`, `grep 1045|Access denied` ? none.
+
+**B. Wrong root password - configurator (the fail-fast that was missing).**
+
+```
+ERROR: MARIADB_ROOT_PASSWORD was rejected by MariaDB (mariadb).
+       The db-data volume keeps the password it was initialised with, so editing
+       .env alone does not change it - .env and that volume now disagree.
+       Fix: set MARIADB_ROOT_PASSWORD in .env to the password the volume uses.
+       On a host whose data you can lose you may instead start over with
+       'docker compose down -v' - that DESTROYS the database.
+
+  EXIT=1   elapsed=1s
+```
+
+1 second - the refused-password branch must **not** pay the 180 s connection
+retry (section 15.3), and it does not.
+
+**C. Wrong root password - backend.** Throwaway container, correct apps,
+bad password:
+
+```
+[backend] selected modules:productix_core  productix_instruction productix_kpi productix_recipe
+[backend] site verdict: fatal:root-auth
+[backend] ==================== FATAL ====================
+[backend] MariaDB rejected MARIADB_ROOT_PASSWORD.
+...
+>>> EXIT CODE = 1  (expected 1, and gunicorn must NOT start)
+```
+
+**D. Fresh install, first-init race replayed.** `px-verdict` - isolated
+project, **volumes destroyed first** so MariaDB re-ran initialisation
+(port 8086):
+
+```
+[configurator] waiting for MariaDB at mariadb:3306 to accept TCP connections...
+[configurator] ready (site=productix.local)
+  up -d elapsed = 37s          configurator exit=0
+[backend] site verdict: fresh
+[backend] installing:productix_core  productix_instruction productix_kpi productix_recipe
+[backend] running post_install hook for productix_recipe: productix_recipe.setup_data.run
+[backend] site verified: 'productix.local' is answering
+```
+
+The temp-server window that broke the first draft of this fix (section 15.3) is now
+retried through instead of failing.
+
+**E. THE INCIDENT, REPRODUCED AND REPAIRED.** A fully installed site (748
+tables) was damaged into the friend's exact state - database dropped,
+`site_config.json` deliberately left in place - then given an ordinary
+`docker compose restart backend`:
+
+```
+db_name = _5a5cc2442a2840be
+--- tables before drop (site is fully installed) ---
+748
+--- dropping the database ---
+  drop exit = 0
+--- site_config.json is deliberately LEFT IN PLACE ---
+-rw-r--r-- 1 frappe frappe 116 ... /sites/productix.local/site_config.json
+```
+
+Next boot:
+
+```
+[backend] site 'productix.local' is half-created (config without a usable database)
+[backend] site verdict: reinstall
+[backend] removing the half-created site directory sites/productix.local
+[backend] installing:productix_core  productix_instruction productix_kpi productix_recipe
+[backend] running post_install hook for productix_recipe: productix_recipe.setup_data.run
+[backend] site verified: 'productix.local' is answering
+```
+
+Full verdict history for that stack:
+
+| # | verdict | what happened |
+|---|---|---|
+| 1 | `fresh` | first install |
+| 2 | `ok` | verified, gunicorn |
+| 3 | `reinstall` | **config present, database gone ? rebuilt** |
+| 4 | `ok` | rebuilt and verified |
+
+Final state: `health=healthy`, all five routes **200** following redirects,
+`grep 1045|Access denied` ? **none**. Under the old rule (`if [ -f
+site_config.json ]`) verdict 3 would have been `ok`, gunicorn would have booted
+against a missing database, and every request would have answered 500/502
+forever - restarting could never have healed it.
+
+**F. Not a regression.** `/app` answers `301 ? /login?redirect-to=...`
+unauthenticated. The untouched old-code stack `px-fresh` answers the
+**identical** redirect, so this is ordinary Frappe behaviour, not a change:
+`-L` ? 200 for `/app`, `/app/productix-recipe`, `/app/kpi-tracking`,
+`/app/instruction-room` on both stacks.
+
+**G. Battery.** `BATTERY=PASS`, all eight steps `=0` including
+`DEPLOY_EXIT=0`. Guard proven capable of failing in both directions
+(section 15.4), then markers removed and re-run to green.
+
+### 15.6 Separate issue found while proving this fix (not caused by it)
+
+The fresh install surfaced a **pre-existing** failure, recorded here so it is
+not mistaken for a regression of the work above.
+
+`set-config developer_mode 1` was already in the committed entrypoint
+(HEAD line 141) and in `setup_site.sh:138` / `setup_site.ps1:91`. With
+`developer_mode` on, Frappe's `NumberCard.on_update` writes the card back into
+the **app source tree**:
+
+```python
+def on_update(self):
+    if frappe.conf.developer_mode and self.is_standard:
+        export_to_files(record_list=[["Number Card", self.name]], record_module=self.module)
+```
+
+Inside the container, every file that came from the host git checkout is
+`root:root` while the runtime user is `frappe` (uid 1000):
+
+```
+--- probe: a NEW file created by frappe (uid 1000) ---
+  -rw-r--r-- frappe:frappe  .../.ownprobe
+--- a python file that came from git on the host ---
+  -rw-r--r-- root:root      .../productix_recipe/__init__.py
+
+ownership census over every linked module (files):
+  productix_core         36 frappe:frappe   46 root:root
+  productix_instruction  15 frappe:frappe   18 root:root
+  productix_kpi         121 frappe:frappe  193 root:root
+  productix_recipe       63 frappe:frappe   96 root:root
+  total                 235 frappe:frappe  353 root:root
+```
+
+`open(path, "w+")` on an existing file needs write permission on the *file*,
+not the directory, so the export dies:
+
+```
+File ".../export_file.py", line 56, in write_document_file
+    with open(path, "w+") as txtfile:
+PermissionError: [Errno 13] Permission denied: '.../total_active_items.json'
+```
+
+Frappe's `bench execute` then swallows that real exception and re-raises a
+misleading one, which is what appears in the log:
+
+```python
+try:
+    ret = frappe.get_attr(method)(*args, **kwargs)
+except Exception:
+    ret = eval(method + "(*args, **kwargs)", globals(), locals())   # ? NameError
+```
+
+**Consequence.** `setup_workspace.run()` calls `_setup_custom_docperms()`
+first (line 14, which completes) and then `_create_number_cards()` (line 15,
+which throws), so lines 16-19 - dashboard charts, workspace layout,
+builtin-workspace hiding, page roles - plus `setup_data.run()`'s
+`_create_team_messages()` are skipped, and the hook exits non-zero. The
+container restarts once and then serves normally: **steps 1-11 did commit**
+(verified - the rebuilt site holds exactly the 6 suppliers `_create_suppliers()`
+creates, 24 items, 66 roles) and all 6 recipe Number Cards are present because
+they also ship as **fixtures** declared in `hooks.py:115`, which `bench migrate`
+imports independently. End state is `healthy` with every route 200.
+
+**Status: FIXED (option A) - `developer_mode` is now forced off in the
+deployment path.** The entrypoint runs as `frappe` with no root, so it can
+never `chown`/`chmod` host-bound files; removing the reason to write the
+source tree at all is the fix that needs no privilege.
+
+| File | Change |
+|---|---|
+| `docker/backend-entrypoint.sh` | Install path sets `developer_mode 0` before `migrate` and the hooks. A new step between the final verdict and the gunicorn handover re-asserts `0` on **every** start, so a site created before this change heals itself. |
+| `setup_site.sh` / `setup_site.ps1` | The manual path sets `0` instead of `1`. |
+| `docker-compose.yml` | The two setup scripts were added to the read-only deployment mounts so the battery can check them. |
+| `tests/_battery_static.sh` | New group 6: fails if any of the three scripts enables `developer_mode`, or if it stops forcing it off. |
+
+Checked against the frappe source before changing it, because `bench migrate`
+and the fixture import must keep working:
+
+- `frappe/utils/fixtures.py` - `import_fixtures` is **not** gated on
+  `developer_mode` at all, so fixtures (Role, Custom Field, Workspace,
+  Number Card, Report) still import on every migrate.
+- `frappe/commands/site.py` and `frappe/installer.py` contain no
+  `developer_mode` reference, so `bench new-site` never enables it either.
+- `frappe/modules/patch_handler.py:149` already forces it to `0` while
+  patches run, so migrate never depended on it being on.
+- The two developer-only actions it does gate (`export_customizations`,
+  login-as-a-user) are called nowhere in this repo.
+- Telemetry's `is_enabled()` additionally requires `on_frappecloud()` and a
+  `pulse_api_key`, both absent - it stays disabled.
+- Two runtime effects move in the right direction: `assets_json` becomes
+  cached (`frappe/utils/__init__.py:1025`) and CORS preflight gains
+  `Access-Control-Max-Age` (`frappe/app.py:333`).
+
+Evidence - fresh install, volumes destroyed first (project `px-verdict`,
+port 8086):
+
+```
+[backend] site verdict: fresh
+[backend] running post_install hook for productix_recipe: ...setup_data.run
+  Custom DocPerms configured         = 1    (last line reached before the crash)
+  Number Cards created               = 1    (was 0 - this is exactly where it died)
+  configured successfully            = 1    (hook's final line, never reached before)
+  PermissionError                    = 0    (was 2)
+  NameError                          = 0    (was 2)
+  Traceback                          = 0    (was 4)
+[backend] initial setup complete
+[backend] site verified: 'productix.local' is answering
+developer_mode = 0
+restarts=0    health=healthy    1045/Access denied: none
+/login /app /app/productix-recipe /app/kpi-tracking /app/instruction-room -> 200
+```
+
+The crash-restart is gone as well: `restarts=0`, against `1` before.
+
+Self-healing on a site that already existed: the main stack's
+`productix.local` was installed with `developer_mode: 1`. After the backend
+container was recreated with this change, its next boot printed
+`site verdict: ok` -> `site verified` -> `starting gunicorn`, and
+`site_config.json` now reads `developer_mode = 0`.
+
+Guard proof - `# marker developer_mode 1` planted in both files at once:
+
+```
+!! /usr/local/bin/backend-entrypoint.sh enables developer_mode (saving a standard document then writes the source tree)
+!! /opt/productix/deployment/setup_site.sh enables developer_mode (saving a standard document then writes the source tree)
+DEPLOY_EXIT=1    BATTERY=FAIL    exit 1
+```
+
+Both files then restored byte-identical and the battery went green again.

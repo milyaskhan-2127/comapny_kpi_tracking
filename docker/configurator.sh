@@ -6,8 +6,9 @@
 # condition: service_completed_successfully`, so this is the first thing that
 # touches a fresh deployment. It therefore has to:
 #
-#   1. fail FAST with a readable message when .env is incomplete - otherwise
-#      the backend exits and `restart: unless-stopped` turns one missing
+#   1. fail FAST with a readable message when .env is incomplete OR when
+#      MARIADB_ROOT_PASSWORD does not actually authenticate against MariaDB -
+#      otherwise the backend exits and `restart: unless-stopped` turns one bad
 #      variable into an endless, hard-to-diagnose restart loop;
 #   2. write the global bench configuration (db / redis / default site);
 #   3. make `sites/assets` point at the shared assets volume.
@@ -51,6 +52,73 @@ if [ ! -f "$BENCH_DIR/sites/$SITE/site_config.json" ] && [ -z "${ADMIN_PASSWORD:
     echo "       then run 'docker compose up -d' again." >&2
     exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# 1b. MARIADB_ROOT_PASSWORD has to WORK, not merely be set.
+#
+# Checked here - before any other service starts - because a wrong-but-set
+# password used to pass every check, let the whole stack come up, and only
+# surface minutes later as HTTP 500/502 from the backend while `bench
+# new-site` died half way through (see docker/backend-entrypoint.sh, which
+# verifies the *site's* database on every start; this is its mirror image,
+# checking the root account the setup depends on).
+#
+# MariaDB's own healthcheck cannot do this: `mysqladmin ping` exits 0 even
+# when it is refused ("the server is running" is all it answers), so an
+# accepted-looking `healthy` state proves nothing about the password.
+#
+# Two different outcomes, deliberately treated differently:
+#
+#   REFUSED password  -> fail at once. That is the failure this check exists
+#                        for, and waiting would only delay the message.
+#   UNREACHABLE host  -> retry against a deadline. On a brand-new deployment
+#                        MariaDB runs a temporary server while it initialises
+#                        the data directory: it already answers over the unix
+#                        socket (so the healthcheck goes green) but is still
+#                        listening with `port: 0`, i.e. not yet on 3306. A
+#                        fixed sleep would either lose the race or stall every
+#                        start, so we wait for the real listener instead.
+# ---------------------------------------------------------------------------
+DB_HOST="${DB_HOST:-mariadb}"
+DB_PORT="${DB_PORT:-3306}"
+DB_READY_TIMEOUT="${DB_READY_TIMEOUT:-180}"
+DB_ERR=/tmp/productix-configurator.err
+DB_DEADLINE=$(( $(date +%s) + DB_READY_TIMEOUT ))
+
+while :; do
+    if MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mysql -h "$DB_HOST" -P "$DB_PORT" -u root \
+        --connect-timeout=10 --batch --skip-column-names -e "SELECT 1" \
+        >/dev/null 2>"$DB_ERR"; then
+        rm -f "$DB_ERR"
+        break
+    fi
+
+    err=$(cat "$DB_ERR" 2>/dev/null || true)
+
+    case "$err" in
+    *"Access denied"*)
+        rm -f "$DB_ERR"
+        echo "ERROR: MARIADB_ROOT_PASSWORD was rejected by MariaDB ($DB_HOST)." >&2
+        echo "       The db-data volume keeps the password it was initialised with, so editing" >&2
+        echo "       .env alone does not change it - .env and that volume now disagree." >&2
+        echo "       Fix: set MARIADB_ROOT_PASSWORD in .env to the password the volume uses." >&2
+        echo "       On a host whose data you can lose you may instead start over with" >&2
+        echo "       'docker compose down -v' - that DESTROYS the database." >&2
+        exit 1
+        ;;
+    esac
+
+    if [ "$(date +%s)" -ge "$DB_DEADLINE" ]; then
+        rm -f "$DB_ERR"
+        echo "ERROR: MariaDB at $DB_HOST:$DB_PORT did not accept TCP within ${DB_READY_TIMEOUT}s: $err" >&2
+        echo "       Check 'docker compose ps' and 'docker compose logs mariadb'." >&2
+        exit 1
+    fi
+
+    echo "[configurator] waiting for MariaDB at $DB_HOST:$DB_PORT to accept TCP connections..."
+    sleep 5
+done
+rm -f "$DB_ERR"
 
 # ---------------------------------------------------------------------------
 # 2. global bench configuration

@@ -57,18 +57,59 @@ docker compose up -d
 What happens automatically:
 
 1. **configurator** (`docker/configurator.sh`) runs first. It aborts with an
-   explicit message if `MARIADB_ROOT_PASSWORD`/`ADMIN_PASSWORD` are missing
-   (so a bad `.env` fails `docker compose up -d` cleanly instead of leaving
-   the backend restart-looping), then writes the global bench config and
-   links `sites/assets` to the shared assets volume.
-2. **backend entrypoint** (`docker/backend-entrypoint.sh`) notices the site
-   does not exist yet and, on its own: discovers the apps under `apps/`
-   (or honours `PRODUCTIX_APPS`), runs `bench new-site`, installs ERPNext
-   plus the selected productix apps, then `migrate` / `clear-cache` /
-   `bench build --hard-link`, and seeds the recipe demo data **only** when
-   `productix_recipe` is selected.
-3. It hands over to the image's `start.sh` (gunicorn). Later restarts detect
-   the existing site and skip straight to gunicorn.
+   explicit message if `MARIADB_ROOT_PASSWORD`/`ADMIN_PASSWORD` are missing,
+   and then **proves** the root password actually authenticates against
+   MariaDB (`SELECT 1`) before any other service starts — a `.env` value that
+   no longer matches the `db-data` volume therefore stops the stack with one
+   readable message instead of coming up broken (see
+   `tests/ACCEPTANCE_EVIDENCE.md` §15). A connection problem is retried
+   against a deadline, because on a first boot MariaDB answers over its unix
+   socket while still listening with `port: 0`; a *refused* password fails at
+   once. It then writes the global bench config and links `sites/assets` to
+   the shared assets volume.
+2. **backend entrypoint** (`docker/backend-entrypoint.sh`) decides from the
+   **state of the database**, never from the presence of a file. It asks for
+   a verdict — `fresh`, `ok`, `reinstall` or `fatal:*` — by checking that the
+   site's configuration exists, that its database exists, that the schema is
+   non-empty, and that the site's own database credentials authenticate. On
+   `fresh`/`reinstall` it discovers the apps under `apps/` (or honours
+   `PRODUCTIX_APPS`), runs `bench new-site`, installs ERPNext plus the
+   selected apps, then `migrate` / `clear-cache` / `bench build --hard-link`,
+   and finally runs each selected module's own `post_install` hook (declared
+   in that module's `productix_module.json`), so a module seeds its own data
+   without this script ever naming it. On `ok` it skips setup — but only
+   after the database agreed that it should.
+3. It **re-verifies** the site and only then hands over to the image's
+   `start.sh` (gunicorn). If verification fails gunicorn is deliberately not
+   started: serving a database that cannot answer is exactly what used to
+   turn one bad password into an endless HTTP 500/502. Between those two
+   steps it also forces `developer_mode` **off** — with it on, Frappe writes
+   standard documents (Number Cards, Reports, DocTypes) back into the app
+   source tree whenever they are saved, and that tree belongs to the host
+   checkout, which the `frappe` user cannot write. It is re-asserted on
+   **every** start rather than only during install, so a site created before
+   this rule existed repairs itself on its next boot
+   (`tests/ACCEPTANCE_EVIDENCE.md` §15.6).
+
+The verdicts, for when you are reading a log:
+
+| Verdict | Meaning | Action |
+|---|---|---|
+| `fresh` | no site configuration yet | install |
+| `ok` | configuration + database + non-empty schema + the site's own credentials all check out | skip setup, start gunicorn |
+| `reinstall` | half-created site: configuration present but no database, or an **empty** schema | drop the empty leftovers and rebuild (0 rows — nothing to lose) |
+| `fatal:root-auth` | MariaDB refused `MARIADB_ROOT_PASSWORD` | stop, with the fix printed |
+| `fatal:root-connect` | MariaDB unreachable | stop, pointing at `docker compose logs mariadb` |
+| `fatal:site-auth` | the site's database holds data but its own credentials were refused even after repair | stop, printing the last error |
+
+A refused *site* account on a database that **does** hold data is repaired
+rather than reinstalled: `CREATE USER IF NOT EXISTS` + `ALTER USER` + `GRANT`
+touch only accounts, never a table, so a rotated password heals itself on the
+next restart.
+
+The stack stops loudly rather than starting broken. Nothing here is tied to a
+particular combination of apps — every decision above reads manifests and
+database state, so any subset of the modules behaves identically.
 
 `setup_site.sh` / `setup_site.ps1` remain the *manual* path — use them to
 provision a second site, to add apps to an existing site, or when you want

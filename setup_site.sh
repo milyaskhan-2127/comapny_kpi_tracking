@@ -135,7 +135,7 @@ done
 echo "[6/6] Running migrations, build, assets sync..."
 docker compose exec -e MSYS_NO_PATHCONV=1 backend bash -c "
   cd /home/frappe/frappe-bench && \
-  bench --site $SITE_NAME set-config developer_mode 1 && \
+  bench --site $SITE_NAME set-config developer_mode 0 && \
   bench --site $SITE_NAME migrate && \
   bench --site $SITE_NAME clear-cache && \
   bench build --hard-link

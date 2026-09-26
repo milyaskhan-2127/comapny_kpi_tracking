@@ -113,6 +113,17 @@ services:
       - *productix-source
       - *productix-shim
       - ./docker/backend-entrypoint.sh:/usr/local/bin/backend-entrypoint.sh:ro
+      # Deployment sources, read-only. Nothing here is used at runtime - they
+      # exist so tests/_battery_static.sh can assert, from inside this
+      # container, that the startup self-heal guards in these files are still
+      # present. Without them a regression is invisible until a bad password
+      # turns into a permanently broken site (tests/ACCEPTANCE_EVIDENCE.md
+      # section 15).
+      - ./docker-compose.yml:/opt/productix/deployment/docker-compose.yml:ro
+      - ./docker/configurator.sh:/opt/productix/deployment/configurator.sh:ro
+      - ./nginx.conf.template:/opt/productix/deployment/nginx.conf.template:ro
+      - ./setup_site.sh:/opt/productix/deployment/setup_site.sh:ro
+      - ./setup_site.ps1:/opt/productix/deployment/setup_site.ps1:ro
     depends_on:
       configurator:
         condition: service_completed_successfully
@@ -122,6 +133,19 @@ services:
         condition: service_started
       redis-queue:
         condition: service_started
+    # Proves gunicorn can actually SERVE the site, not merely that :8000 is
+    # open - so `docker compose ps` says `unhealthy` instead of the stack
+    # looking fine while every request 502s. frappe resolves the site from
+    # the Host header, hence the -H: without it every request answers 404 and
+    # the healthcheck would never go green. Nothing depends on this state
+    # (the frontend only waits for `started`), so a first boot that spends
+    # 15 minutes in `bench new-site` cannot be blocked by it.
+    healthcheck:
+      test: 'curl -fsS -m 5 -H "Host: $$SITE_NAME" http://127.0.0.1:8000/api/method/ping >/dev/null || exit 1'
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 900s
 
   frontend:
     image: frappe/erpnext:v15.121.3
@@ -236,6 +260,11 @@ services:
       - --wait-timeout=28800
       - --interactive-timeout=28800
     healthcheck:
+      # Liveness only, deliberately: `mysqladmin ping` exits 0 even when the
+      # password is refused (its answer is only "the server is running"), so
+      # making it credential-sensitive would mark mariadb `unhealthy` and stop
+      # the configurator from ever running - taking away the one place that
+      # reports the mismatch in a readable way (see docker/configurator.sh).
       test: mysqladmin ping -h localhost --password=$${MYSQL_ROOT_PASSWORD}
       interval: 1s
       retries: 20

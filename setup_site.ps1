@@ -88,7 +88,7 @@ foreach ($app in $ProductixApps) {
 }
 
 Write-Host "`n[5/6] Running migrations, build, assets sync..." -ForegroundColor Yellow
-docker compose exec backend bash -c "cd /home/frappe/frappe-bench && bench --site $SITE_NAME set-config developer_mode 1 && bench --site $SITE_NAME migrate && bench --site $SITE_NAME clear-cache && bench build --hard-link"
+docker compose exec backend bash -c "cd /home/frappe/frappe-bench && bench --site $SITE_NAME set-config developer_mode 0 && bench --site $SITE_NAME migrate && bench --site $SITE_NAME clear-cache && bench build --hard-link"
 
 # Optional per-module post-install hook, declared by the module itself:
 #     "post_install": "<dotted.path.callable>"
