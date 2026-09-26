@@ -104,12 +104,14 @@ env/bin/python -m pytest tests/test_generic_discovery.py -q      # manifest-disc
 > container) executes both validators, `compileall`, the two pytest modules,
 > the legacy-coverage audit, the asset probe and the **deployment self-heal
 > guards** (`DEPLOY_EXIT`), printing `*_EXIT=n` for each. The deployment step
-> reads `docker/backend-entrypoint.sh`, `docker/configurator.sh`,
-> `docker-compose.yml` and `nginx.conf.template` through the read-only mounts
-> declared on the backend service, and asserts mechanisms only — that setup is
+> reads `docker/backend-entrypoint.sh`, `docker/frontend-entrypoint.sh`,
+> `docker/configurator.sh`, `docker-compose.yml` and `nginx.conf.template`
+> through the read-only mounts declared on the backend service, and asserts
+> mechanisms only — that setup is
 > decided from database state rather than a file's existence, that the root
 > password is really authenticated, that the healthcheck can tell the truth,
-> that nginx never pins a container IP, and that no module name appears
+> that nginx never pins a container IP, that the frontend cannot start serving
+> before the backend can answer (group 4b), and that no module name appears
 > anywhere in the deployment layer. No assertion names a module, so adding one
 > cannot change the result. `pytest` is a test-only dependency installed
 > ephemerally into the
@@ -118,6 +120,29 @@ env/bin/python -m pytest tests/test_generic_discovery.py -q      # manifest-disc
 > the HOME-based logger fallback frappe opens at import time on a fresh
 > container (without it, pytest dies with
 > `INTERNALERROR: FileNotFoundError: /home/frappe/logs/database.log`).
+
+> **Frontend boot-readiness check (behavioural; host, needs docker):**
+> `tests/frontend_gate_check.sh` starts and stops nginx on its own and points
+> the entrypoint at addresses where nothing listens, so it runs in a
+> throwaway container rather than inside the stack, as the image's default uid
+> (which is what makes the writable-path fallback a real test):
+>
+> ```
+> docker run --rm \
+>   -v "$PWD/nginx.conf.template:/etc/nginx/conf.d/frappe.conf.template:ro" \
+>   -v "$PWD/docker/frontend-entrypoint.sh:/usr/local/bin/fe.sh:ro" \
+>   -v "$PWD:/w:ro" \
+>   frappe/erpnext:v15.121.3 sh /w/tests/frontend_gate_check.sh
+> ```
+>
+> 24 checks, exit 0 only if all pass: missing `BACKEND`/`SOCKETIO` fail hard
+> rather than proxying to a blank target; the template renders with no
+> placeholder left behind; an unwritable `FRONTEND_WARMING_DIR` falls back
+> instead of crash-looping; a dead upstream answers **503 + `Retry-After: 5`**
+> carrying the self-reloading page (was 502) on `/`, `/login` and `/app`; the
+> gate holds nginx for the full window and then starts anyway with a warning;
+> and it releases immediately once the backend really answers. It complements
+> deployment guard 4b above, which asserts the same mechanisms structurally.
 
 `tests/test_generic_discovery.py` builds synthetic app trees in a temp dir and
 asserts: pass case, future-module discovery without Core edits, and every

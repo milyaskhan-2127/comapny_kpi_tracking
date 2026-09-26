@@ -1,7 +1,17 @@
 # Productix ERP — Nginx config template.
-# `__SITE_NAME__` is replaced at container start with the SITE_NAME env var
-# by docker/frontend-entrypoint.sh (see docker-compose.yml frontend service).
-# No site names are hard-coded.
+#
+# Every placeholder written as an UPPER_CASE token in double underscores is
+# replaced at container start by docker/frontend-entrypoint.sh (see
+# docker-compose.yml frontend service). The token, and the value it becomes:
+#
+#   SITE_NAME          -> NGINX_SITE_NAME / FRAPPE_SITE_NAME_HEADER
+#   BACKEND_UPSTREAM   -> BACKEND   (the same value the readiness gate probes)
+#   SOCKETIO_UPSTREAM  -> SOCKETIO
+#   WARMING_DIR        -> directory holding the "starting up" page
+#
+# Nothing is hard-coded: no site name, and no upstream address either. The
+# entrypoint refuses to start if a placeholder survives substitution, so nginx
+# can never silently proxy to a literal upstream token.
 
 server {
 	listen 8080 default_server;
@@ -21,8 +31,15 @@ server {
 	# longer needs `backend` / `websocket` to be resolvable while it boots -
 	# container start order cannot break it either.
 	resolver 127.0.0.11 valid=5s ipv6=off;
-	set $backend_upstream backend:8000;
-	set $socketio_upstream websocket:9000;
+	set $backend_upstream __BACKEND_UPSTREAM__;
+	set $socketio_upstream __SOCKETIO_UPSTREAM__;
+
+	# Net for a backend that is not listening (first boot, or one that dies
+	# later): turn the bare 502/504 into a 503 with Retry-After and a page that
+	# reloads itself, instead of a dead end that reads as a broken proxy.
+	# Only connection-level failures reach this - proxy_intercept_errors stays
+	# off, so an error the APPLICATION returns is passed through untouched.
+	error_page 502 504 =503 /_warming_up;
 
 	proxy_buffer_size 128k;
 	proxy_buffers 4 256k;
@@ -38,6 +55,17 @@ server {
 
 	location /assets {
 		try_files $uri =404;
+	}
+
+	# Served ONLY through the error_page above (internal redirect), so this URL
+	# is never reachable on its own and cannot expose anything real.
+	location = /_warming_up {
+		internal;
+		root __WARMING_DIR__;
+		try_files /index.html =503;
+		# `always` is required: 503 is not in add_header's default status list.
+		add_header Retry-After 5 always;
+		add_header Cache-Control "no-store" always;
 	}
 
 	location ~ ^/protected/(.*) {

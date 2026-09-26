@@ -1259,3 +1259,149 @@ DEPLOY_EXIT=1    BATTERY=FAIL    exit 1
 ```
 
 Both files then restored byte-identical and the battery went green again.
+
+## 16. Boot race: nginx served for minutes before gunicorn bound :8000 (2026-09-26)
+
+### 16.1 What was actually broken
+
+A deployment on a second machine came up reporting **502 Bad Gateway** on
+every route while `docker compose ps` showed every container green. The log
+showed the selection layer working correctly (`selected: productix_core
+productix_recipe`, `missing: (none)`), no crash loop, gunicorn listening on
+`0.0.0.0:8000` with four workers booted — so neither this repo's two known
+502 causes (§14.5 stale container IP, §15 half-created site) nor the module
+selection was involved.
+
+The cause was a **race at boot**, invisible in every one of those places:
+
+- `docker-compose.yml` had `frontend.depends_on: backend` in the **short
+  form**, i.e. `service_started`, not `service_healthy`. The frontend was
+  released the moment the backend *container* existed.
+- `docker/frontend-entrypoint.sh` rendered the nginx config and
+  `exec nginx` immediately, with **no readiness check at all**.
+
+The backend deliberately does its slow work *before* handing over to gunicorn
+(`bench new-site` → `bench build` → `bench migrate` → compile translations).
+nginx therefore accepted traffic while nothing was listening on `:8000` →
+`connect() failed (111: Connection refused)` → 502 on every request.
+
+Measured on the affected host: nginx started accepting at **15:45:39**,
+gunicorn reported `Listening on http://0.0.0.0:8000` at **15:47:50** — a
+**2 min 11 s** continuous window of 502. On a true first boot that window is
+many minutes, which is exactly why the backend healthcheck carries
+`start_period: 900s`.
+
+### 16.2 The fix — two layers
+
+**Layer 1, the gate (`docker/frontend-entrypoint.sh`).** Before
+`exec nginx` the script probes the backend in a loop. The probe is
+deliberately the *same* request the compose healthcheck makes — ping **with a
+`Host` header**, because frappe resolves the site from that header; without it
+a perfectly healthy backend answers 404 and reads as dead. It runs at most
+`FRONTEND_BACKEND_WAIT_SECONDS` (default 300) and on timeout starts nginx
+**anyway**, loudly: a slow first boot is delayed, never blocked. Missing
+`BACKEND`/`SOCKETIO` is a hard, explanatory failure, and after substitution
+any surviving `__UPPER_CASE__` token aborts the start — nginx can never
+silently proxy to a literal placeholder.
+
+**Layer 2, the net (`nginx.conf.template`).** For a backend that dies
+*later*:
+
+```nginx
+error_page 502 504 =503 /_warming_up;
+```
+
+`location = /_warming_up` is `internal`, serves a self-reloading page from
+`__WARMING_DIR__` and adds `Retry-After: 5` + `Cache-Control: no-store`
+(`always` — 503 is not in `add_header`'s default status list). Only
+connection-level failures take this path: `proxy_intercept_errors` stays off,
+so an error the **application** returns passes through untouched.
+
+Nothing is hard-coded. The upstreams are now `__BACKEND_UPSTREAM__` /
+`__SOCKETIO_UPSTREAM__` rendered from the `BACKEND`/`SOCKETIO` env vars — the
+same `BACKEND` the gate probes, so the address nginx proxies to and the
+address the gate waits on are the same string and cannot drift apart. The
+warming-page directory is resolved at container start and injected as
+`__WARMING_DIR__`; the image runs as uid 1000 so system paths such as `/opt`
+are read-only and `mkdir` there fails, hence a candidate list with an
+explicitly-announced fallback rather than a crash loop.
+
+**Why `depends_on` was not changed to `service_healthy`:** the backend
+healthcheck's `start_period` is 900 s, so on a first boot that would hold the
+static assets back for the entire install. The short form is kept on purpose
+and the gate waits only for gunicorn to actually serve.
+
+### 16.3 Bug found by the new check itself
+
+The first run of the container check failed on its own guard: the header
+comment of `nginx.conf.template` contained the literal token `__UPPER_CASE__`
+as an illustration of the substitution syntax. The entrypoint's
+placeholder-left check (correctly) refused to start nginx. The comment was
+rewritten to describe the syntax without emitting a match. This is the check
+working as intended — before it, that class of mistake would have shipped as
+nginx proxying to a nonsense upstream.
+
+### 16.4 Evidence (all run on this checkout, 2026-09-26)
+
+**Behavioural check** — `tests/frontend_gate_check.sh`, throwaway container
+at the image's default uid (24 checks, exit 0):
+
+```
+ok  empty BACKEND / empty SOCKETIO are hard, explanatory failures
+ok  nginx -t passes on the rendered config; no placeholder survives
+ok  backend + socketio upstreams came from the env vars; site name rendered
+ok  unwritable FRONTEND_WARMING_DIR was not used, fallback announced loudly
+ok  warming page written to a writable path, and reloads itself
+ok  / -> 503 + Retry-After: 5 (was 502)
+ok  /login -> 503 + Retry-After: 5      ok /app -> 503 + Retry-After: 5
+ok  warming response is not cacheable; body is the self-reloading page
+ok  nginx held back the full window (4s), timeout reported, started anyway
+ok  a serving backend releases nginx immediately (1s, window was 30)
+ok  requests proxy through (200)
+RESULT PASS=24 FAIL=0
+```
+
+**Live stack** — gate on a real backend restart:
+
+```
+[frontend] waiting up to 300s for http://backend:8000/api/method/ping
+[frontend] backend is serving (after 10s) - starting nginx
+[frontend] starting nginx (site=productix.local, backend=backend:8000,
+                            socketio=websocket:9000, warming=/tmp/productix-warming)
+```
+
+**Live stack** — layer 2, with the frontend *never restarted*
+(`docker compose stop backend`, then `start`):
+
+```
+before:  / -> 200   /login -> 200   /api/method/ping -> 200   /app -> 301   /favicon.ico -> 404
+stopped: / -> HTTP/1.1 503 + Retry-After: 5   (all five routes)
+         body = the self-reloading "Starting up" page (1019 bytes)
+restarted: / -> 200  /login -> 200  /api/method/ping -> 200  /app -> 301  /favicon.ico -> 404
+           (no Retry-After on any of them - exact baseline restored)
+```
+
+**Regression guards and matrix** (unchanged baselines):
+
+```
+deployment guard group 4b added .... DEPLOY_EXIT=0    BATTERY=PASS
+combo A (core only) ................ 12 passed, 0 failed
+combo B (core + kpi) ............... 13 passed, 0 failed
+combo C (all four) ................. 15 passed, 0 failed
+host selection tests ............... LOCAL-SELECTION=PASS, LOCAL-SELECTION-PS=PASS
+docker compose config --quiet ...... exit 0
+sh -n on the entrypoint / bash -n on the battery  .... exit 0
+```
+
+Guard 4b is mechanism-based — probe before `exec nginx`, loud timeout,
+refusal of a blank target, upstream taken from the env, `error_page` +
+`Retry-After` present, warming location `internal` — so adding a module cannot
+make it pass or fail.
+
+### 16.5 Files changed
+
+`docker/frontend-entrypoint.sh`, `nginx.conf.template`, `docker-compose.yml`
+(frontend readiness env + the entrypoint mounted read-only into the backend so
+the battery can read it), `.env.example`, `tests/_battery_static.sh` (group
+4b), `tests/frontend_gate_check.sh` (new), `tests/README.md` §4,
+`docs/deployment.md` §4.2/§6.

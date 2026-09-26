@@ -153,6 +153,58 @@ else
     deploy_fail "$NGX is not mounted - the nginx guard cannot run"
 fi
 
+# 4b. boot race: on a first boot the backend spends minutes on new-site /
+#     build / migrate before gunicorn binds :8000, and `depends_on` (short
+#     form, deliberately - the healthcheck start_period is 900s) only waits
+#     for the container to START. If nginx is released then, the whole boot
+#     is 502s that are indistinguishable from a broken proxy. What has to
+#     stay true: the frontend probes the backend (with a Host header, or a
+#     healthy backend reads as dead) BEFORE exec'ing nginx, gives up loudly
+#     rather than blocking a slow boot, refuses a blank proxy target, and a
+#     backend that is not listening answers a retryable 503 - with the
+#     upstream address taken from the environment, not written in the config.
+FENT=$DEPLOY_SRC/frontend-entrypoint.sh
+if [ -f "$FENT" ]; then
+    sh -n "$FENT" 2>/dev/null || deploy_fail "docker/frontend-entrypoint.sh does not parse"
+    grep -qF 'Host: ' "$FENT" \
+        || deploy_fail "the frontend gate probes without a Host header (frappe would 404 a healthy backend)"
+    grep -qF 'Starting nginx anyway' "$FENT" \
+        || deploy_fail "the frontend gate would block a slow first boot instead of starting anyway"
+    grep -qF 'BACKEND is not set' "$FENT" \
+        || deploy_fail "the frontend no longer refuses a blank proxy target"
+    grep -qF '__BACKEND_UPSTREAM__' "$FENT" \
+        || deploy_fail "the frontend no longer injects the upstream address (hard-coded proxy target)"
+    F_GATE=$(grep -n 'curl -fsS' "$FENT" | head -n1 | cut -d: -f1)
+    F_EXEC=$(grep -n 'exec nginx' "$FENT" | head -n1 | cut -d: -f1)
+    if [ -z "$F_GATE" ] || [ -z "$F_EXEC" ]; then
+        deploy_fail "could not locate the readiness probe or the nginx handover"
+    elif [ "$F_EXEC" -le "$F_GATE" ]; then
+        deploy_fail "nginx would start BEFORE the backend readiness probe"
+    fi
+else
+    deploy_fail "$FENT is not mounted - the boot-race guard cannot run"
+fi
+if [ -f "$NGX" ]; then
+    grep -qF 'error_page 502 504 =503' "$NGX" \
+        || deploy_fail "an absent backend is still a dead 502 instead of a retryable 503"
+    grep -qF 'Retry-After' "$NGX" || deploy_fail "the warming response carries no Retry-After"
+    grep -qF 'set $backend_upstream __BACKEND_UPSTREAM__;' "$NGX" \
+        || deploy_fail "the nginx template hard-codes its backend address"
+    grep -qF 'set $socketio_upstream __SOCKETIO_UPSTREAM__;' "$NGX" \
+        || deploy_fail "the nginx template hard-codes its socketio address"
+    if grep -A4 -F 'location = /_warming_up' "$NGX" | grep -qF 'internal;'; then
+        :
+    else
+        deploy_fail "the warming location is not internal - it is reachable as a normal URL"
+    fi
+fi
+if [ -f "$COMPOSE" ]; then
+    grep -qF 'FRONTEND_BACKEND_WAIT_SECONDS' "$COMPOSE" \
+        || deploy_fail "docker-compose.yml does not pass the boot-readiness window to the frontend"
+    grep -qF 'BACKEND:' "$COMPOSE" \
+        || deploy_fail "docker-compose.yml no longer tells the frontend where the backend is"
+fi
+
 # 5. behaviour: the credential the whole setup depends on must really work,
 #    and the exact probe the compose healthcheck runs must answer.
 if MYSQL_PWD="${MARIADB_ROOT_PASSWORD:-}" mysql -h "${DB_HOST:-mariadb}" -P "${DB_PORT:-3306}" \

@@ -65,8 +65,16 @@ sufficient.
 ## 5. Operating at the edge
 
 - Frontend nginx: `nginx.conf.template` → rendered by
-  `docker/frontend-entrypoint.sh` on container start (sed, no extra deps).
-  Port `8080` inbound; adjust TLS at your reverse proxy.
+  `docker/frontend-entrypoint.sh` on container start (sed, plus the `curl`
+  already in the image — no extra deps). Port `8080` inbound; adjust TLS at
+  your reverse proxy. Two things to know before putting this behind a proxy
+  of your own (details in `deployment.md` §4.2):
+  - the entrypoint holds nginx back until the backend answers
+    (`FRONTEND_BACKEND_WAIT_SECONDS`, default 300, `0` = don't wait), so a
+    slow first boot is never a wall of 502s;
+  - a backend that is not listening answers **503 + `Retry-After: 5`** with a
+    self-reloading page, not 502 — so your outer proxy retries rather than
+    surfacing a dead gateway.
 - Backups: `backup.sh` or site-level `bench backup --with-files`; ship dumps
   to your own storage. DB dumps are git-ignored and must never be committed.
 

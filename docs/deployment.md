@@ -299,16 +299,18 @@ must reference exactly those files. Follow these rules:
   must stay a **symlink created at runtime**, or a new module folder would
   require editing `docker-compose.yml` again.
 - nginx resolves its upstreams **per request**, never at config load.
-  `nginx.conf.template` routes through `set $backend_upstream backend:8000;`
-  + `resolver 127.0.0.11 valid=5s`, not an `upstream { server backend:8000; }`
-  block. The `upstream` form is resolved exactly once, when nginx reads its
-  config, and Docker gives a recreated container a new IP — so a
-  backend-only `docker compose up -d` would leave nginx proxying a dead
-  address and **every dynamic route would 502 until someone restarted the
-  frontend by hand**. With the variable form nginx re-resolves through
-  Docker's embedded DNS within `valid=`, so a recreated backend is picked up
-  on its own; it also no longer needs `backend`/`websocket` to be resolvable
-  while it boots, so container start order cannot break it either.
+  `nginx.conf.template` routes through
+  `set $backend_upstream __BACKEND_UPSTREAM__;` (rendered from the `BACKEND`
+  env var at start-up) + `resolver 127.0.0.11 valid=5s`, not an
+  `upstream { server backend:8000; }` block. The `upstream` form is resolved
+  exactly once, when nginx reads its config, and Docker gives a recreated
+  container a new IP — so a backend-only `docker compose up -d` would leave
+  nginx proxying a dead address and **every dynamic route would 502 until
+  someone restarted the frontend by hand**. With the variable form nginx
+  re-resolves through Docker's embedded DNS within `valid=`, so a recreated
+  backend is picked up on its own; it also no longer needs
+  `backend`/`websocket` to be resolvable while it boots, so container start
+  order cannot break it either.
   (Proven by occupying the backend's former IP with an unrelated container
   and confirming all routes still return 200 with the frontend untouched —
   see `tests/ACCEPTANCE_EVIDENCE.md` §14.5.)
@@ -320,6 +322,84 @@ Quick manual check after a deploy (must print 200 for every asset):
 
     docker cp tests/_verify_assets.py productix_erp-backend-1:/home/frappe/frappe-bench/_verify_assets.py
     docker compose exec backend bash -lc "/home/frappe/frappe-bench/env/bin/python /home/frappe/frappe-bench/_verify_assets.py"
+
+### 4.2 Boot readiness (the 502 you get while the site builds itself)
+
+On a **first** boot the backend deliberately does its slow work *before*
+handing over to gunicorn — `bench new-site` → `bench build` →
+`bench migrate` → compile translations. That is minutes of work, and the
+frontend never used to wait for it:
+
+- `docker-compose.yml` had `frontend.depends_on: backend` in the **short
+  form**, which means `service_started`, not `service_healthy` — the frontend
+  was released as soon as the backend *container* existed.
+- `docker/frontend-entrypoint.sh` rendered the nginx config and
+  `exec nginx` immediately, with no readiness check at all.
+
+nginx therefore came up and served traffic while nothing was listening on
+`:8000` → `connect() failed (111: Connection refused)` → **502 on every
+request** for the whole build. `docker compose ps` still shows everything
+green, and a boot-time 502 is visually identical to the two 502 causes this
+repo already fixed (§14.5 stale container IP, §15 half-created site), which
+is what makes it expensive to chase.
+
+Two layers fix it.
+
+**1. The gate — `docker/frontend-entrypoint.sh`.** Before `exec nginx` it
+probes the backend in a loop and only releases nginx once the probe answers:
+
+- The probe is **the same request the compose healthcheck makes**: ping with
+  a `Host` header, because frappe resolves the *site* from that header.
+  Without it a perfectly healthy backend answers `404` and reads as dead.
+- The probe address is the `BACKEND` env var — the very value substituted
+  into `__BACKEND_UPSTREAM__`, so the address nginx proxies to and the
+  address the gate probes **cannot drift apart**.
+- It runs for at most `FRONTEND_BACKEND_WAIT_SECONDS` (default `300`). On
+  timeout nginx starts **anyway**, with a loud warning: a slow first boot is
+  delayed, never blocked. `0` (or a non-numeric value) disables the wait.
+- Missing/empty `BACKEND` or `SOCKETIO` is a hard, explanatory failure —
+  refusing to boot beats serving a blank proxy target.
+- After substitution the script refuses to start if any `__PLACEHOLDER__`
+  survives, so nginx can never silently proxy to a literal
+  `__BACKEND_UPSTREAM__`.
+
+**2. The net — `nginx.conf.template`.** For a backend that dies *later*
+(after nginx is already running):
+
+```nginx
+error_page 502 504 =503 /_warming_up;
+```
+
+`location = /_warming_up` is `internal`, serves a self-reloading
+"starting up" page from `__WARMING_DIR__`, and adds `Retry-After: 5` +
+`Cache-Control: no-store` (`always` — 503 is not in `add_header`'s default
+status list). The result is a **503 that the browser retries on its own**
+instead of a dead 502 that looks like a broken proxy. Only *connection-level*
+failures take this path: `proxy_intercept_errors` stays off, so an error the
+**application** returns is passed through untouched.
+
+The page directory is resolved at container start (the image runs as uid
+1000, so system paths such as `/opt` are read-only and `mkdir` there fails).
+`FRONTEND_WARMING_DIR` is tried first and an unusable value falls back to
+`/tmp` and `$HOME` rather than crash-looping.
+
+**Why not `depends_on: condition: service_healthy`?** Because the backend
+healthcheck's `start_period` is `900s`: on a first boot that would hold the
+static assets back for the whole install. The short form is kept on purpose
+and the gate waits only for gunicorn to actually serve — nginx comes up a few
+seconds after the backend does, and immediately on every later boot.
+
+Verification (both layers):
+
+1. Gate — with the stack stopped, `docker compose up -d` and watch
+   `docker compose logs -f frontend`: the `waiting up to …` line, then
+   `backend is serving (after Ns) - starting nginx`, then **zero** 502s from
+   the first request onward (the window before the fix was ~2 min 11 s).
+2. Net — with the frontend *already running and never restarted*,
+   `docker compose stop backend`, then request `/`, `/login`,
+   `/api/method/ping`, `/app` and `/favicon.ico`: each must return
+   **503 + `Retry-After: 5`** (was 502) and self-recover to 200 after
+   `docker compose start backend`.
 
 ## 5. Backup / restore
 
@@ -336,6 +416,10 @@ See `.env.example` (committed reference; `.env` is git-ignored):
   — SMTP; the Email Account is only provisioned when `MAIL_PASSWORD` is set.
 - `GROQ_API_KEY` — KPI AI assistant (or site config `groq_api_key`).
 - `SITE_NAME`, `ADMIN_PASSWORD`, `MARIADB_ROOT_PASSWORD`, `PRODUCTIX_APPS`.
+- `FRONTEND_BACKEND_WAIT_SECONDS` (default `300`), `FRONTEND_BACKEND_PROBE_PATH`
+  (default `/api/method/ping`), `FRONTEND_BACKEND_PROBE_INTERVAL` (default
+  `2`), `FRONTEND_WARMING_DIR` (default `/tmp/productix-warming`) — frontend
+  boot readiness; see §4.2.
 
 ## 7. git-secret hygiene & required pre-push history cleanup
 

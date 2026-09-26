@@ -136,6 +136,7 @@ services:
       - ./docker/productix-selection.sh:/opt/productix/deployment/productix-selection.sh:ro
       - ./docker/productix-selection.ps1:/opt/productix/deployment/productix-selection.ps1:ro
       - ./docker/backend-entrypoint.sh:/opt/productix/deployment/backend-entrypoint.sh:ro
+      - ./docker/frontend-entrypoint.sh:/opt/productix/deployment/frontend-entrypoint.sh:ro
     depends_on:
       configurator:
         condition: service_completed_successfully
@@ -178,6 +179,16 @@ services:
       UPSTREAM_REAL_IP_RECURSIVE: "off"
       PROXY_READ_TIMEOUT: 120
       CLIENT_MAX_BODY_SIZE: 50m
+      # Readiness gate: the backend spends minutes on new-site/build/migrate
+      # before gunicorn binds :8000, and `depends_on` below only waits for the
+      # container to START. The entrypoint holds nginx back until the backend
+      # answers, then starts it anyway if this long. 0 disables the wait.
+      FRONTEND_BACKEND_WAIT_SECONDS: ${FRONTEND_BACKEND_WAIT_SECONDS:-300}
+      FRONTEND_BACKEND_PROBE_PATH: ${FRONTEND_BACKEND_PROBE_PATH:-/api/method/ping}
+      FRONTEND_BACKEND_PROBE_INTERVAL: ${FRONTEND_BACKEND_PROBE_INTERVAL:-2}
+      # Warming-page directory. The image runs as uid 1000 so system paths are
+      # read-only; the entrypoint falls back automatically if this is unusable.
+      FRONTEND_WARMING_DIR: ${FRONTEND_WARMING_DIR:-/tmp/productix-warming}
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
@@ -186,6 +197,10 @@ services:
       - ./docker/frontend-entrypoint.sh:/usr/local/bin/frontend-entrypoint.sh:ro
     ports:
       - "8080:8080"
+    # Short form = service_started, deliberately: the backend's healthcheck
+    # start_period is 900s, and waiting for `service_healthy` would hold the
+    # static assets back for the whole first boot. The entrypoint's readiness
+    # gate waits only for gunicorn to actually serve.
     depends_on:
       - backend
       - websocket
