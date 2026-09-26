@@ -3,36 +3,31 @@
 set -e
 export MSYS_NO_PATHCONV=1
 
+# Shared with setup_site.sh and the Docker bootstrap: one implementation of
+# "which modules does this deployment use", so an update can never build a
+# different set from the one the site was set up with.
+# shellcheck source=docker/productix-selection.sh
+. "$(dirname "$0")/docker/productix-selection.sh"
+productix_load_dotenv "$(dirname "$0")/.env"
+
 SITE_NAME="${SITE_NAME:-productix.local}"
 
-# Same module selection semantics as setup_site.sh: PRODUCTIX_APPS override,
-# otherwise every app discovered via its productix_module.json manifest.
-# Platform first (manifest flagged "always_enabled").
-PLATFORM_APP=""
-DISCOVERED_APPS=()
-for manifest in apps/productix_*/productix_*/productix_module.json; do
-    [ -f "$manifest" ] || continue
-    app=$(basename "$(dirname "$(dirname "$manifest")")")
-    if grep -qE '"always_enabled"[[:space:]]*:[[:space:]]*true' "$manifest"; then
-        PLATFORM_APP="$app"
-    else
-        DISCOVERED_APPS+=("$app")
-    fi
+# Module selection - see docker/productix-selection.sh. An exported
+# PRODUCTIX_APPS still overrides .env for a single run.
+px_select "apps" "${PRODUCTIX_APPS:-}"
+
+PRODUCTIX_APPS_LIST=()
+for _pxa in $PX_SELECTION; do
+    PRODUCTIX_APPS_LIST+=("$_pxa")
 done
 
-if [ -n "$PRODUCTIX_APPS" ]; then
-    IFS=', ' read -r -a PRODUCTIX_APPS_LIST <<< "$PRODUCTIX_APPS"
-else
-    PRODUCTIX_APPS_LIST=("${DISCOVERED_APPS[@]}")
+if [ ${#PRODUCTIX_APPS_LIST[@]} -eq 0 ]; then
+    echo "ERROR: no productix apps discovered under apps/ - run from the repo root or set PRODUCTIX_APPS." >&2
+    exit 1
 fi
-
-# platform first, de-duplicated
-if [ -n "$PLATFORM_APP" ]; then
-    REST=()
-    for app in "${PRODUCTIX_APPS_LIST[@]}"; do
-        [ "$app" = "$PLATFORM_APP" ] || REST+=("$app")
-    done
-    PRODUCTIX_APPS_LIST=("$PLATFORM_APP" "${REST[@]}")
+if [ -n "$PX_UNAVAILABLE" ]; then
+    echo "ERROR: PRODUCTIX_APPS selected modules that are not present:$PX_UNAVAILABLE" >&2
+    exit 1
 fi
 
 PIP_INSTALLS=""

@@ -19,24 +19,80 @@ entries — see §4.1):
 
 Module selection happens in two layers:
 
-1. **Install set** — which apps are installed on a site, chosen at setup via
-   `PRODUCTIX_APPS`:
-   - `setup_site.ps1` (Windows) / `setup_site.sh` (Linux)
-   - Default: **discovered** — every `apps/productix_*/` app shipping a
+1. **Install set** — which apps are installed on a site, chosen via
+   `PRODUCTIX_APPS`. There is exactly **one** implementation of the rules, in
+   `docker/productix-selection.sh`, mirrored for Windows by
+   `docker/productix-selection.ps1`. Every entry point uses it, so they can
+   never disagree:
+
+   | Entry point | Uses |
+   |---|---|
+   | `docker compose up -d` | `docker/backend-entrypoint.sh` |
+   | `setup_site.sh` / `setup_site.ps1` | `productix-selection.sh` / `.ps1` |
+   | `deploy.sh` / `deploy.ps1` | `productix-selection.sh` / `.ps1` |
+
+   All four also **read `.env` themselves** (explicit export beats the file),
+   so `PRODUCTIX_APPS` written in `.env` applies to the container bootstrap,
+   to a manual setup and to an update alike. Before this, `.env` was
+   interpolated only by docker compose, so a manual `./setup_site.sh` ignored
+   it and installed a different set.
+
+   The rules:
+
+   - **Default: discovered** — every `apps/productix_*/` app shipping a
      `productix_module.json` manifest, with the platform app (manifest
      flagged `always_enabled`, today `productix_core`) installed first. A
      future app added under `apps/` is picked up with no script edit and no
      compose edit: `docker/productix-apps.sh` links whatever `./apps`
      contains, and discovery reads the manifests (see
-     `future-module-template.md`). The legacy `apps/productix` tree shipped
-     no manifest and has been retired from the repo.
-   - Example subset: `PRODUCTIX_APPS="productix_core,productix_recipe"` —
-     any subset works; the platform app is always included either way.
-   - When `PRODUCTIX_APPS` is set, the platform app is still auto-added
-     first if missing.
+     `future-module-template.md`).
+   - **Explicit list**: `PRODUCTIX_APPS="productix_core,productix_recipe"` —
+     commas and/or spaces, any subset. The platform app is always included
+     either way, and names that do not exist under `apps/` are reported.
+   - **`requires` is resolved transitively**, depth-first, so a dependency is
+     installed *before* the module that needs it, even when it was never
+     written in `PRODUCTIX_APPS`.
+   - **The bench base (`frappe`, `erpnext`, overridable via `PX_BENCH_BASE`)
+     is never part of a module selection** and never reported as missing —
+     it is installed unconditionally, exactly as a Frappe site always has it.
+   - **A module is an app that ships its own manifest.** `frappe` and
+     `erpnext` have none, which is how the bench base stays out of a
+     selection without being named in one.
+
+   Run either selection file standalone to see what a given `.env` would do —
+   it prints the ordered install list, what was requested and what is absent.
+
 2. **Runtime enablement** — Productix Settings → *Productix Module
    Entitlement* can disable an installed module at runtime (API 403 + hidden
-   from UI). See `architecture.md` §3.
+   from UI). See `architecture.md` §3. This is a *display/API* switch; it
+   never changes what is installed on disk.
+
+### 2.1 Drift: what happens when `.env` changes later
+
+On **every** start the entrypoint reconciles the selection against the
+site's own `installed_apps`:
+
+| Situation | Action |
+|---|---|
+| selected, not installed | `bench install-app --force`, then `migrate` + `build` |
+| installed, not selected | **reported loudly, never uninstalled** |
+| installed but no module manifest | left alone (that is the bench base) |
+
+`--force` is needed because of *where* drift comes from: a site whose
+`installed_apps` row no longer lists an app still has that app's `Module Def`
+rows, and a plain `install-app` dies on `Duplicate entry '<Module>' for
+PRIMARY`. `force` only relaxes that duplicate check and re-syncs the app's
+doctype JSON — it never drops a table or a document, and it never reaches this
+script's own `post_install` re-seed (that is a separate runner, see below).
+The install is still gated on the site's own `installed_apps`, so `--force`
+can never be pointed at an app the site already reports as installed.
+
+Uninstalling is deliberately never automatic: dropping an app drops its
+tables with it. If a module really should go, the report prints the exact
+`bench --site <site> uninstall-app <module>` to run by hand.
+
+The outcome is printed as a **module status** block just before gunicorn, so
+a mismatch is visible without digging a dead container's log out.
 
 ## 3. Fresh deployment
 
@@ -71,32 +127,67 @@ What happens automatically:
    **state of the database**, never from the presence of a file. It asks for
    a verdict — `fresh`, `ok`, `reinstall` or `fatal:*` — by checking that the
    site's configuration exists, that its database exists, that the schema is
-   non-empty, and that the site's own database credentials authenticate. On
-   `fresh`/`reinstall` it discovers the apps under `apps/` (or honours
-   `PRODUCTIX_APPS`), runs `bench new-site`, installs ERPNext plus the
-   selected apps, then `migrate` / `clear-cache` / `bench build --hard-link`,
-   and finally runs each selected module's own `post_install` hook (declared
-   in that module's `productix_module.json`), so a module seeds its own data
-   without this script ever naming it. On `ok` it skips setup — but only
-   after the database agreed that it should.
+   non-empty, and that the site's own database credentials authenticate.
+
+   The verdict alone does not decide the action: a site whose database
+   *works* is not the same as a site that *finished installing*. A crash
+   after `bench new-site` used to leave a database that verified `ok` for
+   ever, so whatever had not been installed stayed missing on every boot.
+   Two markers settle it:
+
+   - `sites/.productix_started.<site>` — written before the first step;
+   - `sites/<site>/.productix_install_complete` — written only after every
+     step **and** every hook succeeded, together with
+     `sites/<site>/.productix_hooks_done` (the hooks already run).
+
+   Verdict + markers produce one of three modes:
+
+   | Mode | When | What runs |
+   |---|---|---|
+   | `fresh` | no usable site | `new-site`, install the selection, migrate/build, run hooks |
+   | `resume` | install started but never completed | finish the install, run the hooks still outstanding |
+   | `sync` | install completed (or a pre-marker site, adopted as complete) | reconcile only: install the difference, migrate/build |
+
+   In every mode the same selection rules from §2 apply. Reconciliation adds
+   what is missing and reports — never removes — what is extra, so adding a
+   module to `PRODUCTIX_APPS` later installs it on the next boot, and
+   removing one only warns. `apps.txt` is rewritten as a **union** of the
+   selection and what is already installed, so an app is never silently
+   forgotten by Frappe.
+
+   **`post_install` hooks run only while a site is being provisioned**
+   (`fresh` / `resume`). A hook can re-seed — productix_recipe's wipes
+   production data before re-creating the demo set — so it is never replayed
+   automatically on a completed site. A module added to a finished site is
+   installed *without* its hook, and the log prints the one-line command to
+   run it deliberately. A hook that fails does not take the site down (the
+   site is already verified), but it withholds the completion marker, so the
+   failure is re-bannered on every boot until it is fixed.
+
 3. It **re-verifies** the site and only then hands over to the image's
    `start.sh` (gunicorn). If verification fails gunicorn is deliberately not
    started: serving a database that cannot answer is exactly what used to
-   turn one bad password into an endless HTTP 500/502. Between those two
-   steps it also forces `developer_mode` **off** — with it on, Frappe writes
-   standard documents (Number Cards, Reports, DocTypes) back into the app
-   source tree whenever they are saved, and that tree belongs to the host
-   checkout, which the `frappe` user cannot write. It is re-asserted on
-   **every** start rather than only during install, so a site created before
-   this rule existed repairs itself on its next boot
+   turn one bad password into an endless HTTP 500/502. Just before handover
+   it prints the module status (§2.1). Between those two steps it also forces
+   `developer_mode` **off** — with it on, Frappe writes standard documents
+   (Number Cards, Reports, DocTypes) back into the app source tree whenever
+   they are saved, and that tree belongs to the host checkout, which the
+   `frappe` user cannot write. It is re-asserted on **every** start rather
+   than only during install, so a site created before this rule existed
+   repairs itself on its next boot
    (`tests/ACCEPTANCE_EVIDENCE.md` §15.6).
+
+> **Change `.env` → `docker compose up -d`, not `docker compose restart`.**
+> `restart` re-uses the container that was created, and container settings
+> are baked at `up` time — the old values of `.env` would keep applying
+> silently. `up -d` re-interpolates and recreates what changed.
 
 The verdicts, for when you are reading a log:
 
 | Verdict | Meaning | Action |
 |---|---|---|
 | `fresh` | no site configuration yet | install |
-| `ok` | configuration + database + non-empty schema + the site's own credentials all check out | skip setup, start gunicorn |
+| `ok` | configuration + database + non-empty schema + the site's own credentials all check out | resume if the install never finished, otherwise reconcile and start gunicorn |
 | `reinstall` | half-created site: configuration present but no database, or an **empty** schema | drop the empty leftovers and rebuild (0 rows — nothing to lose) |
 | `fatal:root-auth` | MariaDB refused `MARIADB_ROOT_PASSWORD` | stop, with the fix printed |
 | `fatal:root-connect` | MariaDB unreachable | stop, pointing at `docker compose logs mariadb` |

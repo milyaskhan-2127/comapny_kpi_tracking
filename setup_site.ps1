@@ -6,6 +6,19 @@
 #   (default: every app discovered via its productix_module.json manifest;
 #    the platform app - manifest flagged "always_enabled" - is installed first)
 
+# Shared with the Docker bootstrap: one implementation of "which modules does
+# this deployment use", so a manual setup cannot install a different set from
+# the one `docker compose up` installs for the same .env.
+$ProductixRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+. (Join-Path $ProductixRoot 'docker\productix-selection.ps1')
+
+# .env is this deployment's configuration. Compose has always read it for the
+# container path; this script used to ignore it completely, so a
+# PRODUCTIX_APPS written in .env was honoured by the automatic bootstrap and
+# silently dropped here. An exported variable still wins, so a one-shot
+# override keeps working.
+Import-ProductixDotEnv -Path (Join-Path $ProductixRoot '.env')
+
 $SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { "productix.local" }
 
 # Production safety: if PRODUCTION=1, require explicit credentials via env vars.
@@ -36,31 +49,27 @@ if ($env:PRODUCTION -eq "1") {
     }
 }
 
-# Discover modular apps from their manifests (no hard-coded app list).
-$Manifests = @(Get-ChildItem -Path "apps/productix_*/productix_*/productix_module.json" -ErrorAction SilentlyContinue)
-$PlatformName = ""
-$DiscoveredApps = @()
-foreach ($m in $Manifests) {
-    $app = $m.Directory.Parent.Name
-    if ((Get-Content $m.FullName -Raw) -match '"always_enabled"\s*:\s*true') {
-        $PlatformName = $app
-    } else {
-        $DiscoveredApps += $app
-    }
-}
+# Module selection is NOT decided here. It is resolved by the shared rules in
+# docker/productix-selection.ps1 - discovery from each module's own
+# productix_module.json, the always_enabled platform app, and the transitive
+# `requires` of whatever was selected - so this script installs exactly what
+# the Docker bootstrap would install for the same .env.
+$Selection = Get-ProductixSelection -AppsRoot (Join-Path $ProductixRoot 'apps') -Requested "$env:PRODUCTIX_APPS"
+$ProductixApps = @($Selection.Selected)
 
-if ($env:PRODUCTIX_APPS) {
-    $ProductixApps = @($env:PRODUCTIX_APPS -split '[,\s]+' | Where-Object { $_ })
-} else {
-    $ProductixApps = @($DiscoveredApps)
-}
-
-if ($PlatformName -and -not ($ProductixApps -contains $PlatformName)) {
-    $ProductixApps = @($PlatformName) + $ProductixApps
-    Write-Host "NOTE: $PlatformName is the platform - added automatically." -ForegroundColor Yellow
-}
 if (-not $ProductixApps) {
     throw "no productix apps discovered under apps/ - run from the repo root or set PRODUCTIX_APPS"
+}
+if ($Selection.Unavailable.Count -gt 0) {
+    Write-Error "PRODUCTIX_APPS selected modules that are not present: $($Selection.Unavailable -join ' ')"
+    Write-Error "Modules available under apps/: $((Get-ChildItem -Path (Join-Path $ProductixRoot 'apps/productix_*') -Directory -ErrorAction SilentlyContinue | ForEach-Object Name) -join ' ')"
+    exit 1
+}
+if ($Selection.Platform -and $Selection.Requested -and ($Selection.Requested -notcontains $Selection.Platform)) {
+    Write-Host "NOTE: $($Selection.Platform) is the platform - added automatically." -ForegroundColor Yellow
+}
+if ($Selection.DepGaps.Count -gt 0) {
+    Write-Warning "a module declares 'requires' an app that is not in apps/: $($Selection.DepGaps -join ' ')"
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -98,9 +107,8 @@ Write-Host "`n[6/6] Running module post-install hooks..." -ForegroundColor Yello
 foreach ($app in $ProductixApps) {
     $Manifests = @(Get-ChildItem -Path "apps/$app/*/productix_module.json" -ErrorAction SilentlyContinue)
     foreach ($Manifest in $Manifests) {
-        $Raw = Get-Content $Manifest.FullName -Raw
-        if ($Raw -match '"post_install"\s*:\s*"([^"]+)"') {
-            $Hook = $Matches[1]
+        $Hook = Get-ProductixManifestValue -Manifest $Manifest.FullName -Key 'post_install'
+        if ($Hook) {
             Write-Host "    Running post_install hook for ${app}: $Hook"
             docker compose exec backend bash -c "cd /home/frappe/frappe-bench && bench --site $SITE_NAME execute $Hook"
             if ($LASTEXITCODE -ne 0) { Write-Error "post_install hook failed for $app"; exit 1 }

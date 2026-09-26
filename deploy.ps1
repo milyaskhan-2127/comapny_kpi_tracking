@@ -1,28 +1,25 @@
 # Quick deploy script for updates (pip editable + migrate + clear-cache + build assets)
+
+# Shared with setup_site.ps1 and the Docker bootstrap: one implementation of
+# "which modules does this deployment use", so an update can never build a
+# different set from the one the site was set up with.
+$ProductixRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+. (Join-Path $ProductixRoot 'docker\productix-selection.ps1')
+Import-ProductixDotEnv -Path (Join-Path $ProductixRoot '.env')
+
 $SITE_NAME = if ($env:SITE_NAME) { $env:SITE_NAME } else { "productix.local" }
 
-# Same module selection semantics as setup_site.ps1: PRODUCTIX_APPS override,
-# otherwise every app discovered via its productix_module.json manifest.
-# Platform first (manifest flagged "always_enabled").
-$Manifests = @(Get-ChildItem -Path "apps/productix_*/productix_*/productix_module.json" -ErrorAction SilentlyContinue)
-$PlatformName = ""
-$DiscoveredApps = @()
-foreach ($m in $Manifests) {
-    $app = $m.Directory.Parent.Name
-    if ((Get-Content $m.FullName -Raw) -match '"always_enabled"\s*:\s*true') {
-        $PlatformName = $app
-    } else {
-        $DiscoveredApps += $app
-    }
-}
+# Module selection - see docker/productix-selection.ps1. An exported
+# PRODUCTIX_APPS still overrides .env for a single run.
+$Selection = Get-ProductixSelection -AppsRoot (Join-Path $ProductixRoot 'apps') -Requested "$env:PRODUCTIX_APPS"
+$ProductixApps = @($Selection.Selected)
 
-if ($env:PRODUCTIX_APPS) {
-    $ProductixApps = @($env:PRODUCTIX_APPS -split '[,\s]+' | Where-Object { $_ })
-} else {
-    $ProductixApps = @($DiscoveredApps)
+if (-not $ProductixApps) {
+    throw "no productix apps discovered under apps/ - run from the repo root or set PRODUCTIX_APPS"
 }
-if ($PlatformName) {
-    $ProductixApps = @($PlatformName) + @($ProductixApps | Where-Object { $_ -ne $PlatformName })
+if ($Selection.Unavailable.Count -gt 0) {
+    Write-Error "PRODUCTIX_APPS selected modules that are not present: $($Selection.Unavailable -join ' ')"
+    exit 1
 }
 
 Write-Host "Deploying updates to $SITE_NAME (apps: $($ProductixApps -join ', ')) ..." -ForegroundColor Yellow

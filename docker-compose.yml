@@ -25,6 +25,10 @@
 # ---------------------------------------------------------------------------
 x-productix-source: &productix-source ./apps:/opt/productix-apps
 x-productix-shim: &productix-shim ./docker/productix-apps.sh:/usr/local/bin/productix-apps.sh:ro
+# The module-selection rules, sourced by backend-entrypoint.sh. It sits
+# beside the shim because it answers the other half of the same question:
+# the shim decides what is IMPORTABLE, this decides what gets INSTALLED.
+x-productix-selection: &productix-selection ./docker/productix-selection.sh:/usr/local/bin/productix-selection.sh:ro
 
 # The queue and scheduler services have no custom script of their own, so
 # they get this wrapper instead: source the module shim (PYTHONPATH must be
@@ -53,6 +57,7 @@ x-backend-volumes: &backend-volumes
   - assets:/home/frappe/frappe-bench/assets
   - *productix-source
   - *productix-shim
+  - *productix-selection
 
 services:
   configurator:
@@ -112,6 +117,8 @@ services:
       - assets:/home/frappe/frappe-bench/assets
       - *productix-source
       - *productix-shim
+      # The module-selection rules, sourced at the top of the entrypoint.
+      - *productix-selection
       - ./docker/backend-entrypoint.sh:/usr/local/bin/backend-entrypoint.sh:ro
       # Deployment sources, read-only. Nothing here is used at runtime - they
       # exist so tests/_battery_static.sh can assert, from inside this
@@ -124,6 +131,11 @@ services:
       - ./nginx.conf.template:/opt/productix/deployment/nginx.conf.template:ro
       - ./setup_site.sh:/opt/productix/deployment/setup_site.sh:ro
       - ./setup_site.ps1:/opt/productix/deployment/setup_site.ps1:ro
+      - ./deploy.sh:/opt/productix/deployment/deploy.sh:ro
+      - ./deploy.ps1:/opt/productix/deployment/deploy.ps1:ro
+      - ./docker/productix-selection.sh:/opt/productix/deployment/productix-selection.sh:ro
+      - ./docker/productix-selection.ps1:/opt/productix/deployment/productix-selection.ps1:ro
+      - ./docker/backend-entrypoint.sh:/opt/productix/deployment/backend-entrypoint.sh:ro
     depends_on:
       configurator:
         condition: service_completed_successfully

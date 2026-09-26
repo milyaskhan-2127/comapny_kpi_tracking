@@ -101,8 +101,9 @@ grep -q 'FINAL_VERDICT=' "$ENTR" || deploy_fail "entrypoint does not re-verify t
 if grep -q 'already exists - skipping setup' "$ENTR"; then
     deploy_fail "entrypoint skips setup whenever site_config.json exists (the original bug)"
 fi
-grep -qF 'productix_*/productix_*/productix_module.json' "$ENTR" \
-    || deploy_fail "entrypoint no longer discovers modules through their manifests"
+# the discovery glob lives in the shared selection now - see guard 7
+grep -qF 'productix-selection.sh' "$ENTR" \
+    || deploy_fail "entrypoint no longer resolves the selection through docker/productix-selection.sh"
 grep -q 'root_state' "$ENTR" \
     || deploy_fail "entrypoint can no longer tell an unreachable server from a refused password"
 ENTR_VERIFY=$(grep -n 'FINAL_VERDICT=' "$ENTR" | head -n1 | cut -d: -f1)
@@ -185,6 +186,110 @@ for _dm in "$ENTR" "$DEPLOY_SRC/setup_site.sh" "$DEPLOY_SRC/setup_site.ps1"; do
     grep -qE 'developer_mode[[:space:]]+0' "$_dm" \
         || deploy_fail "$_dm no longer forces developer_mode off"
 done
+
+# 7. module selection: ONE implementation, driven by .env, reconciled on every
+#    start. Three things used to be able to disagree about what
+#    PRODUCTIX_APPS meant - the entrypoint, setup_site and deploy - which is
+#    how a .env asking for recipe+core ended up running KPI instead: the
+#    selection only ever reached the container path, and only ever on a site
+#    that did not exist yet.
+SEL=$DEPLOY_SRC/productix-selection.sh
+SELP=$DEPLOY_SRC/productix-selection.ps1
+
+if [ -f "$SEL" ]; then
+    sh -n "$SEL" 2>/dev/null || deploy_fail "docker/productix-selection.sh does not parse"
+    grep -qF 'productix_*/productix_*/productix_module.json' "$SEL" \
+        || deploy_fail "the shared selection no longer discovers modules through their manifests"
+    grep -qF 'productix_load_dotenv' "$SEL" \
+        || deploy_fail "the shared selection lost the .env reader"
+    grep -q 'px_list_missing' "$SEL" \
+        || deploy_fail "the shared selection lost the drift check (selected minus installed)"
+    grep -q 'PX_BENCH_BASE' "$SEL" \
+        || deploy_fail "the shared selection no longer tells the bench base from a module"
+    grep -q 'px_order' "$SEL" \
+        || deploy_fail "the shared selection no longer resolves 'requires' ahead of its dependents"
+else
+    deploy_fail "$SEL is not mounted - the selection guard cannot run"
+fi
+if [ -f "$SELP" ]; then
+    grep -qF 'function Get-ProductixSelection' "$SELP" \
+        || deploy_fail "docker/productix-selection.ps1 lost Get-ProductixSelection"
+    grep -qF 'function Import-ProductixDotEnv' "$SELP" \
+        || deploy_fail "docker/productix-selection.ps1 lost the .env reader"
+    grep -qF 'BenchBase' "$SELP" \
+        || deploy_fail "the Windows twin does not tell the bench base from a module"
+else
+    deploy_fail "$SELP is missing - a Windows host would resolve the selection differently"
+fi
+
+# every entry point resolves the selection with THOSE rules ...
+for _sel in "$ENTR" "$DEPLOY_SRC/setup_site.sh" "$DEPLOY_SRC/deploy.sh"; do
+    if [ ! -f "$_sel" ]; then
+        deploy_fail "$_sel is not mounted - the shared-selection guard cannot run"
+        continue
+    fi
+    grep -qF 'productix-selection.sh' "$_sel" \
+        || deploy_fail "$_sel resolves the selection on its own instead of using the shared rules"
+done
+# ... and every entry point that runs ON THE HOST also reads .env itself, so a
+# value written there applies outside `docker compose`. The entrypoint runs
+# inside the container, where .env is deliberately not mounted: it receives
+# the same value through compose interpolating the `environment:` block.
+for _sel in "$DEPLOY_SRC/setup_site.sh" "$DEPLOY_SRC/deploy.sh"; do
+    if [ ! -f "$_sel" ]; then
+        deploy_fail "$_sel is not mounted - the .env guard cannot run"
+        continue
+    fi
+    grep -qF 'productix_load_dotenv' "$_sel" \
+        || deploy_fail "$_sel ignores .env - a PRODUCTIX_APPS written there would not apply"
+done
+grep -qE 'PRODUCTIX_APPS:-' "$ENTR" \
+    || deploy_fail "the entrypoint no longer consumes PRODUCTIX_APPS from its environment"
+grep -qE 'PRODUCTIX_APPS:\s*\$\{PRODUCTIX_APPS' "$DEPLOY_SRC/docker-compose.yml" \
+    || deploy_fail "docker-compose.yml no longer forwards .env's PRODUCTIX_APPS to the backend"
+for _sel in "$DEPLOY_SRC/setup_site.ps1" "$DEPLOY_SRC/deploy.ps1"; do
+    if [ ! -f "$_sel" ]; then
+        deploy_fail "$_sel is not mounted - the shared-selection guard cannot run"
+        continue
+    fi
+    grep -qF 'productix-selection.ps1' "$_sel" \
+        || deploy_fail "$_sel resolves the selection on its own instead of using the Windows twin"
+    grep -qF 'Import-ProductixDotEnv' "$_sel" \
+        || deploy_fail "$_sel ignores .env - a PRODUCTIX_APPS written there would not apply"
+done
+
+# a setup that did not finish must resume, not verdict "ok" and skip forever
+grep -qF 'productix_started' "$ENTR" \
+    || deploy_fail "the entrypoint no longer flags an install as started"
+grep -qF '.productix_install_complete' "$ENTR" \
+    || deploy_fail "the entrypoint no longer records a completed install"
+grep -qF 'MODE=resume' "$ENTR" \
+    || deploy_fail "the entrypoint cannot resume an install that died part way through"
+grep -qF 'report_module_status' "$ENTR" \
+    || deploy_fail "the entrypoint no longer prints what is selected vs installed"
+
+# reconcile: install the difference, never destroy it
+grep -q 'px_list_missing' "$ENTR" \
+    || deploy_fail "the entrypoint no longer compares the selection with the site"
+grep -q 'install_app_if_missing' "$ENTR" \
+    || deploy_fail "the entrypoint installs blind instead of reconciling against installed_apps"
+# The reconcile installs with --force (a re-install whose Module Def rows
+# already exist would otherwise die on a duplicate key), so the DATABASE must
+# be consulted first: force is only ever allowed to reach an app the site does
+# not already report as installed. It never uninstalls anything.
+grep -qF 'px_list_has "$INSTALLED_APPS"' "$ENTR" \
+    || deploy_fail "install_app_if_missing no longer consults installed_apps before installing"
+grep -qF 'install-app "$1" --force' "$ENTR" \
+    || deploy_fail "the reconcile cannot re-install a module whose Module Def rows still exist"
+if grep -n 'uninstall-app' "$ENTR" | grep -v 'echo ' >/dev/null 2>&1; then
+    deploy_fail "the entrypoint would uninstall a module - that drops its tables with it"
+fi
+
+# post_install re-seeds, so it may only run while a site is being created
+grep -qF 'run_post_install_hooks' "$ENTR" \
+    || deploy_fail "the entrypoint lost the generic post_install hook runner"
+grep -qF 'announce_pending_seed' "$ENTR" \
+    || deploy_fail "a module added to a finished site would be seeded without being asked"
 
 echo "DEPLOY_EXIT=$DEPLOY_RC"
 record "deployment_self_heal" "$DEPLOY_RC"

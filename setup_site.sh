@@ -11,6 +11,19 @@
 set -e
 export MSYS_NO_PATHCONV=1
 
+# The rules AND the .env reader are shared with the Docker bootstrap, so a
+# manual setup and `docker compose up` cannot resolve the same PRODUCTIX_APPS
+# to two different lists. Relative to this script, so it works from anywhere.
+# shellcheck source=docker/productix-selection.sh
+. "$(dirname "$0")/docker/productix-selection.sh"
+
+# .env is this deployment's configuration file. Compose reads it for the
+# container path; this script used to ignore it completely, which is why a
+# PRODUCTIX_APPS=... written in .env installed one set of modules when you
+# ran `docker compose up` and a different set when you ran this.
+# An exported variable still wins, so one-shot overrides keep working.
+productix_load_dotenv "$(dirname "$0")/.env"
+
 SITE_NAME="${SITE_NAME:-productix.local}"
 
 # Production safety: if PRODUCTION=1, require explicit credentials via env vars.
@@ -35,38 +48,45 @@ else
     fi
 fi
 
-# Discover modular apps from their manifests (no hard-coded app list).
-PLATFORM_APP=""
-DISCOVERED_APPS=()
-for manifest in apps/productix_*/productix_*/productix_module.json; do
-    [ -f "$manifest" ] || continue
-    app=$(basename "$(dirname "$(dirname "$manifest")")")
-    if grep -qE '"always_enabled"[[:space:]]*:[[:space:]]*true' "$manifest"; then
-        PLATFORM_APP="$app"
-    else
-        DISCOVERED_APPS+=("$app")
-    fi
-done
+# Module selection is NOT decided here. It is resolved by the shared rules
+# in docker/productix-selection.sh (discovery from each module's own
+# productix_module.json, the always_enabled platform app, and the transitive
+# `requires` of whatever you selected), so this script installs exactly what
+# the Docker bootstrap would install for the same .env.
+px_select "apps" "${PRODUCTIX_APPS:-}"
 
-if [ -n "$PRODUCTIX_APPS" ]; then
-    IFS=', ' read -r -a PRODUCTIX_APPS_LIST <<< "$PRODUCTIX_APPS"
-else
-    PRODUCTIX_APPS_LIST=("${DISCOVERED_APPS[@]}")
-fi
-
-HAS_PLATFORM=0
-for app in "${PRODUCTIX_APPS_LIST[@]}"; do
-    [ "$app" = "$PLATFORM_APP" ] && HAS_PLATFORM=1
+PRODUCTIX_APPS_LIST=()
+for _pxa in $PX_SELECTION; do
+    PRODUCTIX_APPS_LIST+=("$_pxa")
 done
-if [ -n "$PLATFORM_APP" ] && [ "$HAS_PLATFORM" = "0" ]; then
-    PRODUCTIX_APPS_LIST=("$PLATFORM_APP" "${PRODUCTIX_APPS_LIST[@]}")
-    echo "NOTE: $PLATFORM_APP is the platform — added automatically."
-    HAS_PLATFORM=1
-fi
 
 if [ ${#PRODUCTIX_APPS_LIST[@]} -eq 0 ]; then
     echo "ERROR: no productix apps discovered under apps/ — run from the repo root or set PRODUCTIX_APPS."
     exit 1
+fi
+
+# A module that was named but is not in this checkout has to fail HERE,
+# listing what IS available, rather than deep inside `bench install-app` on a
+# half-created site.
+if [ -n "$PX_UNAVAILABLE" ]; then
+    echo "ERROR: PRODUCTIX_APPS selected modules that are not present:$PX_UNAVAILABLE" >&2
+    echo "        Modules available under apps/:" >&2
+    for _pxd in apps/productix_*; do
+        [ -d "$_pxd" ] || continue
+        echo "          ${_pxd##*/}" >&2
+    done
+    echo "        Fix PRODUCTIX_APPS in .env, or drop the missing folder into apps/." >&2
+    exit 1
+fi
+
+if [ -n "$PX_PLATFORM_APP" ] && [ -n "$PX_REQUESTED" ] && ! px_list_has "$PX_REQUESTED" "$PX_PLATFORM_APP"; then
+    echo "NOTE: $PX_PLATFORM_APP is the platform — added automatically."
+fi
+
+# A manifest can point at a module this checkout does not carry: loud, but
+# not fatal - stopping here would take down an otherwise usable deployment.
+if [ -n "$PX_DEP_GAPS" ]; then
+    echo "WARNING: a module declares 'requires' an app that is not in apps/:$PX_DEP_GAPS" >&2
 fi
 
 echo "========================================"
@@ -148,7 +168,7 @@ docker compose exec -e MSYS_NO_PATHCONV=1 backend bash -c "
 for app in "${PRODUCTIX_APPS_LIST[@]}"; do
     for manifest in "apps/$app"/*/productix_module.json; do
         [ -f "$manifest" ] || continue
-        hook=$(sed -n 's/^[[:space:]]*"post_install"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest")
+        hook=$(px_manifest_get "$manifest" post_install)
         [ -n "$hook" ] || continue
         echo "    Running post_install hook for $app: $hook"
         docker compose exec -e MSYS_NO_PATHCONV=1 backend bash -c "
